@@ -118,6 +118,22 @@ function nav.open(tag)
   return modem ~= nil
 end
 
+-- Hash of our own installed code, so the dashboard can flag a pending update.
+-- Computed once on first report (fromTag is set by nav.open by then) and cached.
+-- `false` = couldn't compute (no groups.lua / pre-update turtle) -> just omit it.
+local codehash = nil
+local function ourCodehash()
+  if codehash ~= nil then return codehash or nil end
+  local okG, groups = pcall(require, "groups")
+  local okU, upd    = pcall(require, "updater")
+  if okG and okU and groups.GROUPS and groups.GROUPS[fromTag] then
+    codehash = upd.localHash(groups.GROUPS[fromTag])
+  else
+    codehash = false
+  end
+  return codehash or nil
+end
+
 function nav.report(status, extra)
   local msg = {
     from  = fromTag,
@@ -125,6 +141,7 @@ function nav.report(status, extra)
     fuel  = nav.fuel(),
     id    = os.getComputerID(),
     name  = os.getComputerLabel(),   -- friendly name for the dashboard (if set)
+    codehash = ourCodehash(),        -- nil unless groups.lua is present
   }
   -- World coordinates, derived from the GPS anchor (home + heading) and the
   -- relative position we track. Only available once the turtle has anchored.

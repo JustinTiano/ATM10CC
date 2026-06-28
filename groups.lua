@@ -19,9 +19,9 @@ return {
   BASE = "https://raw.githubusercontent.com/JustinTiano/ATM10CC/main/",
 
   GROUPS = {
-    quarry    = { "nav.lua", "control.lua", "updater.lua", "startup.lua", "quarry.lua" },
-    stripmine = { "nav.lua", "control.lua", "updater.lua", "startup.lua", "stripmine.lua" },
-    treefarm  = { "nav.lua", "control.lua", "updater.lua", "startup.lua", "treefarm.lua" },
+    quarry    = { "nav.lua", "control.lua", "updater.lua", "startup.lua", "groups.lua", "quarry.lua" },
+    stripmine = { "nav.lua", "control.lua", "updater.lua", "startup.lua", "groups.lua", "stripmine.lua" },
+    treefarm  = { "nav.lua", "control.lua", "updater.lua", "startup.lua", "groups.lua", "treefarm.lua" },
     -- The dashboard also carries the tooling (groups/deploy/install) so it can
     -- update its own deploy machinery over the air.
     dashboard = { "card.lua", "updater.lua", "startup.lua", "monitor.lua",

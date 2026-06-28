@@ -129,9 +129,25 @@ function card.draw(mon, desc, state, x, w, y0, bodyRows)
   fillRect(mon, x, y, w, colors.black)
   hrule(mon, x, y, w, color)
   put(mon, x + 2, y, color, colors.black, " " .. title .. " ")
+  local titleEnd = x + 2 + #title + 2          -- first free col after " title "
   local dispStatus = state._offline and "OFFLINE" or tostring(state.status)
   local rtext = " " .. dispStatus .. " " .. card.ageStr(state) .. " "
   local rx = right - 1 - #rtext
+
+  -- A pending-update token sits just left of the status and is tappable. "[^]"
+  -- (yellow) = update available; "[^!]" (red) = armed, waiting for a confirm tap
+  -- (used when the device is mid-task so a stray tap can't reboot it).
+  local updBtn = nil
+  if state._updateAvail then
+    local tok  = state._updArmed and "[^!]" or "[^]"
+    local tcol = state._updArmed and colors.red or colors.yellow
+    local txk  = rx - 1 - #tok
+    if txk >= titleEnd then
+      put(mon, txk, y, tcol, colors.black, tok)
+      updBtn = { x0 = txk, x1 = txk + #tok - 1, y = y }
+    end
+  end
+
   if rx > x + 3 + #title then
     put(mon, rx, y, card.statusColor(dispStatus), colors.black, rtext)
   end
@@ -196,6 +212,9 @@ function card.draw(mon, desc, state, x, w, y0, bodyRows)
     }
     y = y + 1
   end
+
+  -- The update token lives in the title bar but routes like any other button.
+  if updBtn then buttons = buttons or {}; buttons.update = updBtn end
 
   -- Bottom border closes the box.
   hrule(mon, x, y, w, color)

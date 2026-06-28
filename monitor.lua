@@ -12,6 +12,7 @@
 
 local card    = require("card")
 local updater = require("updater")
+local groups  = require("groups")   -- BASE + per-role file lists (shared with deploy)
 
 local mon     = peripheral.find("monitor")
 local modem   = peripheral.find("modem")
@@ -123,6 +124,19 @@ local DEVICES = {
       end
     end,
   },
+  {
+    -- The dashboard's own card. It never reports over rednet (it can't hear its
+    -- own broadcasts); its state is filled in locally each tick. No GPS, no
+    -- START/STOP -- just status, ID, and its own pending-update token.
+    key = "dashboard", title = "DASHBOARD", color = colors.purple,
+    gps = false, control = false,
+    rows = function(s) return {
+      { "ID",   tostring(s.id or os.getComputerID()), colors.lightGray },
+      { "Code", s._updateAvail and "update ready" or "up to date",
+                s._updateAvail and colors.yellow or colors.lime },
+    } end,
+    warn = function() return nil end,
+  },
 }
 
 local DEV_BY_KEY = {}
@@ -141,6 +155,7 @@ end
 ----------------------------------------------------------------------
 local store = {}
 local cards = {}    -- per-redraw: { {key=, geom=}, ... } for touch routing
+local available = {}  -- role -> code hash currently published at BASE (nil until first check)
 
 ----------------------------------------------------------------------
 -- Output side-effects
@@ -151,6 +166,23 @@ local function notify(msg) if chat then chat.sendMessage(msg, "TURTLE") end end
 local function sendCommand(key, cmd)
   rednet.broadcast(textutils.serialise({ to = key, cmd = cmd }))
   notify("Sent " .. cmd:upper() .. " to " .. DEV_BY_KEY[key].title)
+end
+
+-- Push an update to one device. Turtles get it as a deploy broadcast (same shape
+-- deploy.lua sends); the dashboard can't broadcast to itself, so it self-updates
+-- directly and reboots (the UI relaunches via startup.lua).
+local function triggerUpdate(key)
+  local files = groups.GROUPS[key]
+  if not files then return end
+  if key == "dashboard" then
+    notify("Dashboard self-updating...")
+    updater.selfUpdate(groups.BASE, files)
+  else
+    rednet.broadcast(textutils.serialise({
+      deploy = true, to = key, base = groups.BASE, files = files,
+    }))
+    notify("Updating " .. DEV_BY_KEY[key].title)
+  end
 end
 
 ----------------------------------------------------------------------
@@ -185,11 +217,25 @@ end
 ----------------------------------------------------------------------
 local function tick()
   local now = os.clock()
+
+  -- Keep the self-card "live": it never reports over rednet, so refresh it here.
+  local sd = store["dashboard"]
+  if sd then sd._last, sd.status = now, "online" end
+
   for key, s in pairs(store) do
     local dev     = DEV_BY_KEY[key]
     local age     = now - (s._last or now)
     local working = card.ACTIVE[s.status] or card.ALARM[s.status]
     s._offline    = working and age > OFFLINE_SECS
+
+    -- Pending-update flag: our reported code hash vs what the host now publishes.
+    if available[key] and s.codehash then
+      s._updateAvail = (s.codehash ~= available[key])
+    end
+    if not s._updateAvail then s._updArmed = false end       -- nothing to confirm
+    if s._updArmed and (now - (s._armedAt or 0) > 5) then     -- confirm timed out
+      s._updArmed = false
+    end
 
     local w = dev.warn and dev.warn(s)
     if w then
@@ -203,6 +249,37 @@ local function tick()
     else
       s._alarm, s._acked, s._alert = false, true, "none"
     end
+  end
+end
+
+----------------------------------------------------------------------
+-- Background update checker: its own parallel task so the blocking http.get
+-- calls never freeze the UI. Every CHECK_SECS it fetches each file once from
+-- BASE and hashes each role's list exactly the way the turtles hash their own
+-- installs; tick() compares the two to drive each card's update token. A role's
+-- hash is only published when EVERY file fetched, so a transient 404/timeout
+-- never makes an up-to-date machine look out of date.
+----------------------------------------------------------------------
+local CHECK_SECS = 300
+local function updateChecker()
+  while true do
+    local map, want = {}, {}
+    for _, files in pairs(groups.GROUPS) do
+      for _, f in ipairs(files) do want[f] = true end
+    end
+    for f in pairs(want) do
+      local resp = http.get(groups.BASE .. f)
+      if resp then map[f] = resp.readAll(); resp.close() end
+    end
+    for role, files in pairs(groups.GROUPS) do
+      local complete = true
+      for _, f in ipairs(files) do if map[f] == nil then complete = false; break end end
+      if complete then
+        available[role] = updater.composeHash(files, function(x) return map[x] end)
+      end
+    end
+    os.queueEvent("update_check_done")   -- nudge the UI to redraw with fresh flags
+    sleep(CHECK_SECS)
   end
 end
 
@@ -286,7 +363,20 @@ end
 local function onTouch(tx, ty)
   for _, c in ipairs(cards) do
     local g = c.geom
-    if card.hit(g.buttons and g.buttons.start, tx, ty) then
+    if card.hit(g.buttons and g.buttons.update, tx, ty) then
+      local s = store[c.key]
+      if s and s._updateAvail then
+        -- Idle/parked: act on the first tap. Mid-task (ACTIVE): arm first, act on
+        -- the second tap, so a stray touch can't reboot a working turtle.
+        if card.ACTIVE[s.status] and not s._updArmed then
+          s._updArmed, s._armedAt = true, os.clock()
+        else
+          s._updArmed = false
+          triggerUpdate(c.key)
+        end
+      end
+      return
+    elseif card.hit(g.buttons and g.buttons.start, tx, ty) then
       sendCommand(c.key, "start"); return
     elseif card.hit(g.buttons and g.buttons.stop, tx, ty) then
       sendCommand(c.key, "stop"); return
@@ -305,6 +395,16 @@ end
 ----------------------------------------------------------------------
 local function dashboard()
   print("Dashboard running. Listening...")
+
+  -- Seed the self-card so it shows immediately and can flag its own updates. Its
+  -- code hash is computed locally (it never reports over rednet); the checker
+  -- fills available["dashboard"] for tick() to compare against.
+  store["dashboard"] = store["dashboard"] or { _alert = "none", _acked = true }
+  local sd = store["dashboard"]
+  sd._seen, sd.status, sd._last = true, "online", os.clock()
+  sd.id = os.getComputerID()
+  sd.codehash = updater.localHash(groups.GROUPS["dashboard"])
+
   redraw()
   local timer = os.startTimer(1)
 
@@ -326,4 +426,4 @@ local function dashboard()
   end
 end
 
-parallel.waitForAny(updater.listen, dashboard)
+parallel.waitForAny(updater.listen, dashboard, updateChecker)

@@ -1,4 +1,4 @@
-# Mining & Tree-Farm Fleet — Setup
+# Mining & Tree-Farm Fleet
 
 A small fleet of CC:Tweaked turtles reporting to one dashboard computer, all
 standardized on a **static 7×7 footprint** and a shared **charcoal fuel loop**.
@@ -190,6 +190,29 @@ over-the-air self-update (below).
 
 The cards' **START/STOP** buttons broadcast to each turtle: STOP makes a turtle
 finish its current layer/level/sweep, park safe, and idle; START resumes it.
+
+A **dashboard self-card** (purple) shows this computer's own status and update
+state alongside the turtles.
+
+### Update token (per-card OTA, from the dashboard)
+
+Each card carries its own update control so you never have to drop to the shell
+to push code. Every 5 minutes the dashboard compares the code each machine is
+running against what's published at `BASE` (a content hash — no version numbers
+to maintain) and, when a machine is behind, shows a yellow **`[^]`** token in
+that card's title bar.
+
+- **Tap `[^]` on an idle/parked machine** → it updates immediately (the turtle
+  downloads its files and reboots; the dashboard self-updates and reboots).
+- **Tap `[^]` on a working turtle** → it turns red **`[^!]`** (armed); tap again
+  within 5s to confirm. This guard stops a stray tap from rebooting a turtle
+  mid-dig. (A reboot is resume-safe — it re-anchors via GPS and continues from
+  its `.state` — but it does interrupt the current pass, so update when idle.)
+
+The token clears itself once the machine reports the new code. Because of the
+~5-min raw-GitHub cache, a freshly pushed change can take a few minutes to light
+up the token. The shell `deploy` command (below) still works and does the same
+thing fleet-wide.
 
 ---
 
