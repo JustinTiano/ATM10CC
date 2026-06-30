@@ -291,12 +291,27 @@ local function stepForwardRaw()
   return false
 end
 
+-- Heading calibration is a REAL move, so a turtle that boots with an empty tank
+-- can't do it -- and the worker's own refuel runs only later, mid-corridor. Top up
+-- from the FUEL ender chest first so calibration (and the goHome right after)
+-- always have fuel. Lenient: if the chest is dry but some fuel remains, let
+-- calibration try anyway; only a truly empty tank is a hard error.
+local CALIB_FUEL = 64   -- covers the rise + step + return home, with slack
+local function ensureCalibFuel()
+  if nav.fuel() >= CALIB_FUEL then return end
+  nav.refuelFromEnder(CALIB_FUEL, 0)
+  if nav.fuel() == 0 then
+    error("nav: out of fuel -- add fuel to the turtle or stock the FUEL ender chest", 0)
+  end
+end
+
 -- First run: capture home + heading. Rises `rise` blocks (into clearer air) so
 -- the calibration step doesn't chew up terrain. Leaves the turtle 1 forward +
 -- `rise` up from home; pos is synced. Caller should goHome() afterwards.
 function nav.firstRunAnchor(rise)
   local h = nav.locate()
   if not h then error("nav: no GPS fix for anchor (is the constellation up?)", 0) end
+  ensureCalibFuel()
   for _ = 1, (rise or 0) do
     if turtle.up() then pos.y = pos.y + 1 else turtle.digUp(); turtle.attackUp() end
   end
@@ -317,6 +332,7 @@ end
 -- current position AND facing from GPS (one forward calibration move).
 function nav.recoverOnBoot()
   if not (home and hvec) then error("nav: recoverOnBoot without anchor", 0) end
+  ensureCalibFuel()
   local p1 = nav.locate()
   if not p1 then error("nav: no GPS fix on boot", 0) end
   if not stepForwardRaw() then error("nav: blocked during boot calibration", 0) end
