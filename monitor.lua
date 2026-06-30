@@ -9,6 +9,11 @@
 -- goes silent. GPS, status, an always-reserved warning row, and START/STOP
 -- buttons all live inside each card. Tap a card to acknowledge its alarm; tap a
 -- card's START/STOP button to send that module a control command.
+--
+-- The dashboard itself is NOT a card -- it's a persistent banner across the top
+-- that's always on regardless of which modules are reporting. The banner shows
+-- the dashboard's status + computer ID and an "up to date / UPDATE AVAILABLE"
+-- token; tapping the token when an update is published self-updates and reboots.
 
 local card    = require("card")
 local updater = require("updater")
@@ -31,7 +36,8 @@ mon.setTextScale(0.5)
 local OFFLINE_SECS = 90    -- working module silent this long => OFFLINE alarm
 local DROP_SECS    = 25    -- finished module silent this long => hide its card
 local GAP          = 1     -- columns/rows between cards
-local CARD_TOP     = 1     -- first card row (no header anymore)
+local HEADER_H     = 3     -- rows reserved for the always-on dashboard banner
+local CARD_TOP     = HEADER_H + 1   -- first card row (cards start below banner)
 
 -- ACTIVE/TERMINAL/ALARM come from card.lua; DROPPABLE is dashboard policy.
 local DROPPABLE = { done = true }
@@ -124,23 +130,21 @@ local DEVICES = {
       end
     end,
   },
-  {
-    -- The dashboard's own card. It never reports over rednet (it can't hear its
-    -- own broadcasts); its state is filled in locally each tick. No GPS, no
-    -- START/STOP -- just status, ID, and its own pending-update token.
-    key = "dashboard", title = "DASHBOARD", color = colors.purple,
-    gps = false, control = false,
-    rows = function(s) return {
-      { "ID",   tostring(s.id or os.getComputerID()), colors.lightGray },
-      { "Code", s._updateAvail and "update ready" or "up to date",
-                s._updateAvail and colors.yellow or colors.lime },
-    } end,
-    warn = function() return nil end,
-  },
+}
+
+-- The dashboard's own descriptor. It never tiles as a card -- it's the banner at
+-- the top (see drawHeader). It never reports over rednet (it can't hear its own
+-- broadcasts); its state is filled in locally each tick. It still lives in
+-- DEV_BY_KEY so tick()'s shared offline/update-flag bookkeeping covers it too;
+-- its warn() is a no-op since the banner has no warning row.
+local HEADER = {
+  key = "dashboard", title = "TURTLE OPS", color = colors.purple,
+  warn = function() return nil end,
 }
 
 local DEV_BY_KEY = {}
 for _, d in ipairs(DEVICES) do DEV_BY_KEY[d.key] = d end
+DEV_BY_KEY[HEADER.key] = HEADER
 
 -- Fixed body-row count = the busiest module, so every card is the same height.
 local MAX_ROWS = 0
@@ -155,6 +159,7 @@ end
 ----------------------------------------------------------------------
 local store = {}
 local cards = {}    -- per-redraw: { {key=, geom=}, ... } for touch routing
+local headerBtn = nil -- per-redraw: tappable update token in the banner, or nil
 local available = {}  -- role -> code hash currently published at BASE (nil until first check)
 
 ----------------------------------------------------------------------
@@ -314,6 +319,40 @@ end
 local W, H = mon.getSize()
 local prevLayout = ""
 
+-- Always-on banner across the top: a solid accent bar carrying the dashboard's
+-- status, its computer ID, and an update token. The token reads "up to date"
+-- (dim, inert) until the host publishes new code, then flips to a bright,
+-- tappable "[ UPDATE AVAILABLE ]" -- tapping it self-updates and reboots.
+-- Sets `headerBtn` to the token's hit-box when (and only when) it's tappable.
+local function drawHeader()
+  local s    = store["dashboard"]
+  local bar  = HEADER.color
+  local mid  = 2                      -- banner content lives on the middle row
+
+  card.fillRect(mon, 1, 1, W, colors.black)
+  card.fillRect(mon, 1, mid, W, bar)            -- solid accent bar
+  card.fillRect(mon, 1, HEADER_H, W, colors.black)
+
+  card.put(mon, 2, mid, colors.white, bar, "TURTLE OPS")
+  card.put(mon, 14, mid, colors.lime, bar, "ONLINE")
+
+  -- Right cluster: update token, with the computer ID just to its left.
+  local avail = s and s._updateAvail
+  local tok   = avail and "[ UPDATE AVAILABLE ]" or "up to date"
+  local tx    = W - 1 - #tok
+  if avail then
+    card.put(mon, tx, mid, colors.black, colors.yellow, tok)   -- bright, tappable
+    headerBtn = { x0 = tx, x1 = tx + #tok - 1, y = mid }
+  else
+    card.put(mon, tx, mid, colors.lightGray, bar, tok)         -- dim, inert
+    headerBtn = nil
+  end
+
+  local idtxt = "ID " .. tostring((s and s.id) or os.getComputerID())
+  local idx   = tx - 2 - #idtxt
+  if idx > 22 then card.put(mon, idx, mid, colors.lightGray, bar, idtxt) end
+end
+
 local function redraw()
   local shown = {}
   for _, d in ipairs(DEVICES) do
@@ -328,6 +367,8 @@ local function redraw()
     mon.setBackgroundColor(colors.black); mon.clear()
     prevLayout = sig
   end
+
+  drawHeader()   -- after any full clear so the banner survives a relayout
 
   cards = {}
   local cols = (W >= 2 * card.MIN_W + GAP) and 2 or 1
@@ -365,6 +406,15 @@ end
 -- acknowledges (silences) its alarm.
 ----------------------------------------------------------------------
 local function onTouch(tx, ty)
+  -- Banner update token: self-update + reboot. Drawn only when an update is
+  -- actually published, so a tap can only fire when there's something to apply.
+  if card.hit(headerBtn, tx, ty) then
+    card.flash(mon, headerBtn)
+    local s = store["dashboard"]
+    if s and s._updateAvail then triggerUpdate("dashboard") end
+    return
+  end
+
   for _, c in ipairs(cards) do
     local g = c.geom
     if card.hit(g.buttons and g.buttons.update, tx, ty) then
