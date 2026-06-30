@@ -36,7 +36,7 @@ mon.setTextScale(0.5)
 local OFFLINE_SECS = 90    -- working module silent this long => OFFLINE alarm
 local DROP_SECS    = 25    -- finished module silent this long => hide its card
 local GAP          = 1     -- columns/rows between cards
-local HEADER_H     = 3     -- rows reserved for the always-on dashboard banner
+local HEADER_H     = 2     -- rows reserved for the always-on dashboard banner
 local CARD_TOP     = HEADER_H + 1   -- first card row (cards start below banner)
 
 -- ACTIVE/TERMINAL/ALARM come from card.lua; DROPPABLE is dashboard policy.
@@ -51,6 +51,14 @@ local DROPPABLE = { done = true }
 -- `baseWarn` covers the conditions every module shares; a device's own `warn`
 -- wraps it to add module-specific ones (e.g. the tree farm's empty saplings).
 ----------------------------------------------------------------------
+-- Shared "Fuel" gauge row for every card: a bar scaled to the turtle's reported
+-- fuelLimit (or card.FUEL_FULL), colored by the usual fuel thresholds.
+local function fuelRow(s)
+  local f = s.fuel
+  local val = (type(f) == "number") and (f == math.huge and "MAX" or tostring(f)) or "?"
+  return { "Fuel", val, card.fuelColor(f), bar = card.fuelFrac(f, s.fuelLimit) }
+end
+
 local function baseWarn(s)
   if s._offline                       then return "OFFLINE - no signal" end
   if s.status == "blocked"            then return "STUCK - check it" end
@@ -72,7 +80,7 @@ local DEVICES = {
     key = "quarry", title = "QUARRY", color = colors.orange, gps = true, control = true,
     rows = function(s) return {
       { "Layer", tostring(s.layer or 0) .. " (Y=" .. tostring(s.currentY or "?") .. ")", colors.white },
-      { "Fuel",  s.fuel, card.fuelColor(s.fuel) },
+      fuelRow(s),
     } end,
     warn = baseWarn,
     alert = function(status, s)
@@ -94,7 +102,7 @@ local DEVICES = {
                     .. " (" .. tostring(s.trees) .. " trees)") or "?", colors.lightBlue },
       { "Saplings", s.saplings, (s.saplings == 0) and colors.red or colors.lime },
       { "Logs",     s.logsDeposited or 0, colors.lime },
-      { "Fuel",     s.fuel, card.fuelColor(s.fuel) },
+      fuelRow(s),
     } end,
     warn = function(s)
       -- saplings is reported on every sweep, so empty-stock self-clears on restock.
@@ -115,7 +123,7 @@ local DEVICES = {
     rows = function(s) return {
       { "Y/Side", tostring(s.ylevel or "?") .. " " .. tostring(s.side or ""), colors.white },
       { "Step",   s.step or 0, colors.lime },
-      { "Fuel",   s.fuel, card.fuelColor(s.fuel) },
+      fuelRow(s),
     } end,
     warn = baseWarn,
     alert = function(status, s)
@@ -319,38 +327,38 @@ end
 local W, H = mon.getSize()
 local prevLayout = ""
 
--- Always-on banner across the top: a solid accent bar carrying the dashboard's
--- status, its computer ID, and an update token. The token reads "up to date"
--- (dim, inert) until the host publishes new code, then flips to a bright,
--- tappable "[ UPDATE AVAILABLE ]" -- tapping it self-updates and reboots.
--- Sets `headerBtn` to the token's hit-box when (and only when) it's tappable.
+-- Always-on banner across the top: a plain title line (no background fill) on
+-- black, with the dashboard's status, computer ID, and an update token, closed
+-- off by a thin accent rule. The token reads "up to date" (dim, inert) until the
+-- host publishes new code, then flips to a bright, tappable "[ UPDATE AVAILABLE ]"
+-- -- tapping it self-updates and reboots. Sets `headerBtn` to the token's hit-box
+-- when (and only when) it's tappable.
 local function drawHeader()
-  local s    = store["dashboard"]
-  local bar  = HEADER.color
-  local mid  = 2                      -- banner content lives on the middle row
+  local s   = store["dashboard"]
+  local top = 1                       -- title sits on the first row
 
-  card.fillRect(mon, 1, 1, W, colors.black)
-  card.fillRect(mon, 1, mid, W, bar)            -- solid accent bar
-  card.fillRect(mon, 1, HEADER_H, W, colors.black)
-
-  card.put(mon, 2, mid, colors.white, bar, "TURTLE OPS")
-  card.put(mon, 14, mid, colors.lime, bar, "ONLINE")
+  card.fillRect(mon, 1, top, W, colors.black)
+  card.put(mon, 2,  top, HEADER.color, colors.black, "TURTLE OPS")
+  card.put(mon, 14, top, colors.lime,  colors.black, "ONLINE")
 
   -- Right cluster: update token, with the computer ID just to its left.
   local avail = s and s._updateAvail
   local tok   = avail and "[ UPDATE AVAILABLE ]" or "up to date"
   local tx    = W - 1 - #tok
   if avail then
-    card.put(mon, tx, mid, colors.black, colors.yellow, tok)   -- bright, tappable
-    headerBtn = { x0 = tx, x1 = tx + #tok - 1, y = mid }
+    card.put(mon, tx, top, colors.black, colors.yellow, tok)   -- bright, tappable
+    headerBtn = { x0 = tx, x1 = tx + #tok - 1, y = top }
   else
-    card.put(mon, tx, mid, colors.lightGray, bar, tok)         -- dim, inert
+    card.put(mon, tx, top, colors.lightGray, colors.black, tok) -- dim, inert
     headerBtn = nil
   end
 
   local idtxt = "ID " .. tostring((s and s.id) or os.getComputerID())
   local idx   = tx - 2 - #idtxt
-  if idx > 22 then card.put(mon, idx, mid, colors.lightGray, bar, idtxt) end
+  if idx > 22 then card.put(mon, idx, top, colors.lightGray, colors.black, idtxt) end
+
+  -- Thin accent rule separating the banner from the cards.
+  card.put(mon, 1, HEADER_H, HEADER.color, colors.black, string.rep("-", W))
 end
 
 local function redraw()
@@ -371,14 +379,21 @@ local function redraw()
   drawHeader()   -- after any full clear so the banner survives a relayout
 
   cards = {}
-  local cols = (W >= 2 * card.MIN_W + GAP) and 2 or 1
-  local colW = math.floor((W - (cols - 1) * GAP) / cols)
   local y = CARD_TOP
 
   if #shown == 0 then
     card.put(mon, 2, y, colors.gray, colors.black, "Waiting for modules to report in...")
     return
   end
+
+  -- Pack as many columns as fit (never more than there are cards), each capped to
+  -- card.PREF_W so a lone module stays a tidy box instead of stretching across the
+  -- whole panel. The resulting grid is centered horizontally for balance.
+  local fit  = math.max(1, math.floor((W + GAP) / (card.PREF_W + GAP)))
+  local cols = math.min(#shown, fit)
+  local colW = math.min(card.PREF_W, math.floor((W - (cols - 1) * GAP) / cols))
+  local gridW = cols * colW + (cols - 1) * GAP
+  local x0   = math.max(1, math.floor((W - gridW) / 2) + 1)
 
   local i = 1
   while i <= #shown do
@@ -388,9 +403,8 @@ local function redraw()
       if d then
         local s = store[d.key]
         s.running = isRunning(s)
-        local x = 1 + c * (colW + GAP)
-        local w = (c == cols - 1) and (W - x + 1) or colW
-        local geom = card.draw(mon, d, s, x, w, y, MAX_ROWS)
+        local x = x0 + c * (colW + GAP)
+        local geom = card.draw(mon, d, s, x, colW, y, MAX_ROWS)
         s._geom = geom
         cards[#cards + 1] = { key = d.key, geom = geom }
         if geom.h > rowH then rowH = geom.h end

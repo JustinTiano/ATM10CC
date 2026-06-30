@@ -21,7 +21,7 @@ local desc = {
     { "Field",    (s.size and (s.size .. "x" .. s.size .. " (" .. s.trees .. " trees)")) or "?", colors.lightBlue },
     { "Saplings", s.saplings, s.saplings == 0 and colors.red or colors.lime },
     { "Logs",     s.logsDeposited, colors.lime },
-    { "Fuel",     s.fuel, card.fuelColor(s.fuel) },
+    { "Fuel",     tostring(s.fuel), card.fuelColor(s.fuel), bar = card.fuelFrac(s.fuel, s.fuelLimit) },
   } end,
 }
 
@@ -36,7 +36,7 @@ local state = {
 
 local W, H = mon.getSize()
 local CARD_X, CARD_Y = 1, 1
-local CARD_W = W                      -- use the whole width to measure the fit
+local CARD_W = math.min(card.PREF_W, W)   -- real cards cap at PREF_W; mirror that here
 
 local last = { buttons = nil }
 

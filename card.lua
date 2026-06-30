@@ -16,6 +16,13 @@ local card = {}
 ----------------------------------------------------------------------
 card.LABEL_W = 9     -- "Saplings:" fits in 9; value column starts after it
 card.MIN_W   = 24    -- below this the button row gets cramped (truncates)
+card.PREF_W  = 32    -- preferred/max card width; cards never stretch past this so a
+                     -- couple of modules on a big monitor stay tidy, not bloated.
+
+-- Fuel-gauge scale: the fuel level that fills the bar. Turtles top up into the low
+-- thousands, so this keeps the bar in a useful range; a turtle can report its own
+-- `fuelLimit` to override per-card. Color still comes from card.fuelColor thresholds.
+card.FUEL_FULL = 5000
 
 local BTN_START = "[ START ]"   -- 9 wide
 local BTN_STOP  = "[ STOP ]"    -- 8 wide
@@ -48,6 +55,16 @@ function card.fuelColor(f)
   if f < 200  then return colors.red
   elseif f < 1000 then return colors.yellow
   else return colors.lime end
+end
+
+-- Fraction (0..1) of the fuel gauge to fill, scaled to the turtle's reported
+-- fuelLimit if present, else the shared card.FUEL_FULL.
+function card.fuelFrac(f, limit)
+  if type(f) ~= "number" then return 0 end
+  local m = (type(limit) == "number" and limit > 0) and limit or card.FUEL_FULL
+  local frac = f / m
+  if frac < 0 then return 0 elseif frac > 1 then return 1 end
+  return frac
 end
 
 ----------------------------------------------------------------------
@@ -87,6 +104,17 @@ local function hrule(mon, x, y, w, color)
   put(mon, x, y, color, colors.black, "+" .. string.rep("-", math.max(0, w - 2)) .. "+")
 end
 
+-- A horizontal gauge of total width `w`: a `fill`-colored run proportional to
+-- `frac` (0..1) over a dim track. Drawn with spaces so it reads as a solid bar.
+local function bar(mon, x, y, w, frac, fill)
+  if w <= 0 then return end
+  if frac < 0 then frac = 0 elseif frac > 1 then frac = 1 end
+  local on = math.floor(frac * w + 0.5)
+  if on > 0 then fillRect(mon, x, y, on, fill) end
+  if on < w then fillRect(mon, x + on, y, w - on, colors.gray) end
+end
+card.bar = bar
+
 -- One interior "| label: value |" row.
 local function bodyRow(mon, x, y, w, color, label, value, valueColor)
   fillRect(mon, x, y, w, colors.black)
@@ -95,6 +123,28 @@ local function bodyRow(mon, x, y, w, color, label, value, valueColor)
   put(mon, x + 2, y, colors.lightGray, colors.black, card.pad(label .. ":", card.LABEL_W))
   put(mon, x + 2 + card.LABEL_W, y, valueColor or colors.white, colors.black,
       card.trunc(value, w - 3 - card.LABEL_W))
+end
+
+-- One interior "| label: [#####---] value |" row: a gauge filling the value
+-- column with the numeric value right-aligned on top of its dim tail.
+local function barRow(mon, x, y, w, color, label, frac, valueStr, fillColor)
+  fillRect(mon, x, y, w, colors.black)
+  put(mon, x,         y, color, colors.black, "|")
+  put(mon, x + w - 1, y, color, colors.black, "|")
+  put(mon, x + 2, y, colors.lightGray, colors.black, card.pad(label .. ":", card.LABEL_W))
+  local bx = x + 2 + card.LABEL_W            -- value column start
+  local bw = w - 3 - card.LABEL_W            -- value column width
+  if bw <= 0 then return end
+  bar(mon, bx, y, bw, frac, fillColor or colors.lime)
+  -- Right-align the value text over the bar; pick a contrasting ink per cell.
+  local vs   = card.trunc(valueStr, bw)
+  local vx   = bx + bw - #vs
+  local on   = math.floor(frac * bw + 0.5)
+  for i = 1, #vs do
+    local cx  = vx + i - 1
+    local bg  = (cx - bx) < on and fillColor or colors.gray
+    put(mon, cx, y, colors.black, bg, vs:sub(i, i))
+  end
 end
 
 -- An empty interior row (keeps the side borders so padded cards stay framed).
@@ -172,12 +222,19 @@ function card.draw(mon, desc, state, x, w, y0, bodyRows)
 
   -- Module-specific rows, padded with blank rows to `bodyRows` so all cards
   -- of a dashboard are the same height.
+  -- A row is either a plain text row {label, value, color} or a gauge row, marked
+  -- with .bar = fraction (0..1); .value overlays the gauge as right-aligned text.
   local rows = desc.rows(state)
   local n = bodyRows or #rows
   for i = 1, n do
     local r = rows[i]
-    if r then bodyRow(mon, x, y, w, color, r[1], r[2], r[3])
-    else      blankRow(mon, x, y, w, color) end
+    if r and r.bar ~= nil then
+      barRow(mon, x, y, w, color, r[1], r.bar, tostring(r[2]), r[3])
+    elseif r then
+      bodyRow(mon, x, y, w, color, r[1], r[2], r[3])
+    else
+      blankRow(mon, x, y, w, color)
+    end
     y = y + 1
   end
 
