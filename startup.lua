@@ -44,6 +44,12 @@ end
 
 local runstate = readWord(RUNSTATE_FILE)
 
+-- The dashboard runs monitor.lua, not a turtle program: it never digs, so the
+-- whole STOP/park machinery is meaningless for it. Crucially it must NEVER persist
+-- a "stopped" runstate -- otherwise a crash-and-Ctrl+T (e.g. to reach the shell)
+-- parks it, and it boots forever into "waiting for START" instead of the UI.
+local parkable = (role ~= "monitor" and role ~= "dashboard")
+
 -- A Ctrl+T-able wait: returns true if the user pressed Ctrl+T during it. We use
 -- pullEventRaw so a terminate is a value we can act on, not a fatal error.
 local function abortableSleep(secs)
@@ -59,7 +65,7 @@ end
 -- Job finished cleanly last time: nothing to resume. Stay at the shell so the
 -- turtle never re-digs a completed quarry on a chunk reload.
 ----------------------------------------------------------------------
-if runstate == "done" then
+if parkable and runstate == "done" then
   print("startup: last " .. role .. " job finished -- dropping to shell.")
   print("(delete " .. RUNSTATE_FILE .. ", or re-run " .. program .. ", to start again.)")
   return
@@ -69,7 +75,7 @@ end
 -- Parked by a dashboard STOP: do NOT move. Open rednet and wait for a START so
 -- the dashboard can resume the turtle remotely. Ctrl+T here drops to the shell.
 ----------------------------------------------------------------------
-if runstate == "stopped" then
+if parkable and runstate == "stopped" then
   local modem = peripheral.find("modem")
   if not modem then
     print("startup: parked, but no modem to hear START -- dropping to shell.")
@@ -96,8 +102,12 @@ end
 ----------------------------------------------------------------------
 print("startup: launching " .. program .. " in 3s (Ctrl+T to cancel)...")
 if abortableSleep(3) then
-  writeWord(RUNSTATE_FILE, "stopped")
-  print("startup: cancelled -- parked. START from the dashboard to resume.")
+  if parkable then
+    writeWord(RUNSTATE_FILE, "stopped")
+    print("startup: cancelled -- parked. START from the dashboard to resume.")
+  else
+    print("startup: cancelled -- dropping to shell. Run " .. program .. " to relaunch.")
+  end
   return
 end
 
@@ -110,10 +120,15 @@ while true do
     print("startup: " .. program .. " exited cleanly.")
     break
   end
-  print("startup: " .. program .. " stopped; retrying in 10s (Ctrl+T to park)...")
+  local hint = parkable and "Ctrl+T to park" or "Ctrl+T for shell"
+  print("startup: " .. program .. " stopped; retrying in 10s (" .. hint .. ")...")
   if abortableSleep(10) then
-    writeWord(RUNSTATE_FILE, "stopped")
-    print("startup: parked. START from the dashboard to resume.")
+    if parkable then
+      writeWord(RUNSTATE_FILE, "stopped")
+      print("startup: parked. START from the dashboard to resume.")
+    else
+      print("startup: dropping to shell. Run " .. program .. " to relaunch.")
+    end
     break
   end
 end
