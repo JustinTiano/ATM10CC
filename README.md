@@ -8,7 +8,7 @@ standardized on a **static 7×7 footprint** and a shared **charcoal fuel loop**.
 | `monitor.lua` | Advanced Computer      | Dashboard (modem + monitor + chatBox) |
 | `quarry.lua`  | Mining turtle          | Digs a 7×7 shaft to bedrock |
 | `stripmine.lua`| Mining turtle         | Branch tunnels at fixed Y levels (run after quarry) |
-| `treefarm.lua`| Felling turtle         | 7×7 tree field (16 trees), harvest-from-above |
+| `treefarm.lua`| Felling turtle         | 7×7 birch field (16 trees), harvest-from-above + magnet-chest sapling collection |
 | `nav.lua`     | every turtle           | Shared library (movement, GPS, ender chests) — **must be present** |
 | `control.lua` | every turtle           | START/STOP command listener for the dashboard buttons — **must be present** |
 | `updater.lua` | every computer         | Over-the-air deploy listener (downloads + reboots on command) — **must be present** |
@@ -137,41 +137,44 @@ back walls. Defaults (edit constants at the top of `stripmine.lua`):
 `Y_LEVELS = 48,15,0,-16,-40,-59`.
 
 ### Tree farm
+**Birch only.** Birch is a pure 1×1 trunk with no large/branchy variant, so cutting
+straight down each column removes **100% of the logs** every sweep. With no log left
+standing anywhere, **every leaf decays on its own** — so there is no leaf-clearing
+pass to configure, and trees never "won't die."
+
 Stand on the **front-left corner** of the field, **on the ground** (dirt/grass),
 **facing into** the field. Slot 16 = FUEL chest, Slot 15 = LOGS chest, plus
-saplings + charcoal. Ground across the whole 7×7 must be soil.
+birch saplings + charcoal. Ground across the whole 7×7 must be soil.
 
 ```
-   7x7 footprint -> 16 trees (every-other block)
+   7x7 footprint -> 16 birch (every-other block)
+   T . T . T . T        T = birch sapling
+   . . . . . . .        M = magnet chest at the CENTER block (3,3)
    T . T . T . T
-   . . . . . . .
-   T . T . T . T
-   . . . . . . .
+   . . . M . . .
    T . T . T . T
    . . . . . . .
    T . T . T . T
    ^ turtle starts here, facing into field
 ```
 
-Run `treefarm.lua`. First run captures home + heading from GPS (no prompts) and
-saves `tree_config.txt`; later runs are silent.
+**The magnet chest (sapling collection).** Put a **Sophisticated Storage chest with
+an Advanced Magnet upgrade** at the field **center** (block 3,3 — an odd position, so
+it doesn't displace a tree), its top **flush with the soil**. Center-to-corner of a
+7×7 is ≈4.24 blocks, inside the advanced magnet's ~5-block range, so one chest
+vacuums **every** sapling drop in the field. **Filter the magnet to saplings only**
+(it ignores sticks/apples, and logs never become entities — turtle-dug logs go
+straight to its inventory). The turtle never chases ground drops; before each sweep
+it flies to the center chest and sucks saplings back out to reload its replant
+buffer. Apples are treated as junk and dropped, never replanted. This magnet chest is
+a 3rd piece of infrastructure (alongside the FUEL and LOGS ender chests) but is **not**
+a reserved turtle slot.
 
-**Periodic full clear.** The normal harvest only digs straight down each trunk,
-so big/branchy trees (large oaks especially) leave stray logs between columns and
-leaves that won't decay. Every `CLEAR_EVERY` sweeps (default **6**) the turtle
-visits every column of the field grid and clears it **top-down and targeted**: it
-digs only logs/leaves, free-falls through air, and stops a column once its canopy
-is cleared (a short run of air below the last wood) rather than plowing the empty
-trunk space to the ground. Standing saplings, the soil, and anything it doesn't
-recognize (e.g. a wall you built in the field) are left alone. It **sucks up the
-sapling/apple drops** as it follows them down each column and finishes with a low
-pass just above the field, so they come home instead of needing hand-collection.
-Removing the logs also lets leaves overhanging past the field decay on their own.
-Tunables at the top of `treefarm.lua`: `CLEAR_EVERY` (0 = never), `CLEAR_HEIGHT`
-(scan height above ground — set it to roughly your tallest tree), `CLEAR_MARGIN`
-(how far past the trees to reach). **Keep `CLEAR_HEIGHT` below anything you've
-built over the farm** (GPS hosts, walls). The dashboard shows `clearing` and chats
-once when a clear starts.
+Run `treefarm.lua`. First run captures home + heading from GPS (no prompts) and
+saves `tree_config.txt`; later runs are silent. Tunables at the top of
+`treefarm.lua`: `GROW_WAIT` (seconds between sweeps; ungrown spots are skipped and
+caught next sweep), `SAPLING_BUFFER` (replant stock kept on hand), `TRANSIT_UP`
+(fly height between columns), `FUEL_PER_TREE`/`FUEL_RESERVE`.
 
 ---
 
