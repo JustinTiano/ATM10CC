@@ -8,6 +8,7 @@ standardized on a **static 7×7 footprint** and a shared **charcoal fuel loop**.
 | `monitor.lua` | Advanced Computer      | Dashboard (modem + monitor + chatBox) |
 | `quarry.lua`  | Mining turtle          | Digs a 7×7 shaft to bedrock |
 | `stripmine.lua`| Mining turtle         | Branch tunnels at fixed Y levels (run after quarry) |
+| `oremine.lua` | Mining turtle          | **Ore-seeking** branch miner for the ATM10 Mining Dimension: vein-follows at ore-band Y levels, digs its own shaft (no quarry needed) |
 | `treefarm.lua`| Felling turtle         | 7×7 birch field (16 trees), harvest-from-above + magnet-chest sapling collection |
 | `nav.lua`     | every turtle           | Shared library (movement, GPS, ender chests) — **must be present** |
 | `control.lua` | every turtle           | START/STOP command listener for the dashboard buttons — **must be present** |
@@ -97,7 +98,7 @@ All turtles: attach a **wireless modem** (any side), drop `nav.lua` +
 `<role>.lua` + `startup.lua` in root, and create a one-word `role.txt`:
 
 ```
-echo quarry > role.txt        # or: stripmine / treefarm
+echo quarry > role.txt        # or: stripmine / oremine / treefarm
 ```
 
 `startup.lua` then runs that role on boot, but only if the turtle is supposed to
@@ -135,6 +136,52 @@ transit between Y levels and carves 2-tall branch corridors out of the front and
 back walls. Defaults (edit constants at the top of `stripmine.lua`):
 `TUN_LEN=32`, `BRANCH_LEN=16`, `BRANCH_SPC=3`,
 `Y_LEVELS = 48,15,0,-16,-40,-59`.
+
+### Ore miner — the ATM10 workhorse (best ore-per-fuel)
+For actual ore gathering, this beats both the quarry and strip miner. The quarry
+hauls megatons of stone per ore (good for clearing a build site, wasteful for
+gathering); plain strip mining only catches a vein it tunnels straight through.
+`oremine.lua` adds **vein-following**: at every corridor/branch step it scans the
+full 2-tall cross-section and floods out along any ore it can see, so a branch
+harvests everything within a block or two — and it targets ATM10's real ore bands
+instead of arbitrary depths.
+
+Stand the turtle **on the surface where it can dig straight down**, **facing** the
+direction the corridors should run. It digs its **own** access shaft to each Y
+level (**no quarry needed**). A GPS constellation must be in range **in whatever
+dimension you run it in**. Slot 16 = FUEL chest, Slot 15 = DUMP chest.
+
+**Pick a dimension profile** — a turtle can't tell the Overworld from the Mining
+Dimension (both are plain stone/deepslate), so you choose explicitly. Run it once
+with the profile name; it's saved to `oremine.profile` and reused on every reboot /
+dashboard launch (and survives a Reset — that only re-anchors location):
+
+```
+oremine overworld     # default; or: oremine mining
+```
+
+| Profile | Y levels | Targets |
+|---------|----------|---------|
+| `overworld` *(default)* | `48, 14, -16, -54` | copper (48), iron (14), gold/lapis (−16), **diamond + redstone + allthemodium + deep metals (−54)** |
+| `mining` | `105, 95, 20, -55` | allthemodium/diamond/emerald/copper/iron/tin (105 & 95), ancient debris (20), deep metals (−55) |
+
+The Mining Dimension is the better place to mine if you have access — flat, no
+hostile spawns, very high ore density — but the `overworld` profile works anywhere
+you can set up GPS.
+
+Other defaults (edit constants at the top of `oremine.lua`): `TUN_LEN=48`,
+`BRANCH_LEN=12`, `BRANCH_SPC=3`, `MAX_VEIN=96`. Add `85`/`115` to the `mining`
+levels (or extra bands to `overworld`) for fuller coverage.
+
+**Two ATM10 notes:**
+- **Allthemodium needs a netherite-tier pickaxe.** A diamond turtle physically
+  can't break it; the vein-follower detects this once and **skips that ore-type
+  fast** for the rest of the run (no grinding). Equip a netherite-or-better
+  pickaxe if you want the turtle to actually collect it. In the Overworld it only
+  spawns below Y−40 in the **Deep Dark** — expect sculk (and possibly a Warden;
+  it can't break the turtle, just makes noise).
+- **Vibranium and unobtainium don't spawn in the Overworld or Mining Dimension**
+  (they're Nether / End), so neither profile finds them — that's expected.
 
 ### Tree farm
 **Birch only.** Birch is a pure 1×1 trunk with no large/branchy variant, so cutting
@@ -265,7 +312,7 @@ file is a one-place edit.
 On a brand-new turtle/computer with a modem and HTTP, run one line:
 
 ```
-wget run <BASE>install.lua quarry      # or: stripmine / treefarm / dashboard
+wget run <BASE>install.lua quarry      # or: stripmine / oremine / treefarm / dashboard
 ```
 
 It downloads **only** that role's files (shared libs + the role script), writes

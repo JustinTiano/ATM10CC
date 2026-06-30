@@ -21,6 +21,7 @@ return {
   GROUPS = {
     quarry    = { "nav.lua", "control.lua", "updater.lua", "startup.lua", "groups.lua", "quarry.lua" },
     stripmine = { "nav.lua", "control.lua", "updater.lua", "startup.lua", "groups.lua", "stripmine.lua" },
+    oremine   = { "nav.lua", "control.lua", "updater.lua", "startup.lua", "groups.lua", "oremine.lua" },
     treefarm  = { "nav.lua", "control.lua", "updater.lua", "startup.lua", "groups.lua", "treefarm.lua" },
     -- The dashboard also carries the tooling (groups/deploy/install) so it can
     -- update its own deploy machinery over the air.

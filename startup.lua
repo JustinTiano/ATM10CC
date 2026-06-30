@@ -1,6 +1,6 @@
 -- startup.lua -- runs automatically on boot (chunk reload / server restart).
 --
--- Reads role.txt ("quarry" | "stripmine" | "treefarm") to pick the program, and
+-- Reads role.txt ("quarry" | "stripmine" | "oremine" | "treefarm") to pick the program, and
 -- runstate.txt to decide whether to RUN it. The dashboard's STOP makes a worker
 -- persist runstate="stopped"; START clears it back to "run". So a turtle that was
 -- parked stays parked across reboots instead of silently resuming into your base.

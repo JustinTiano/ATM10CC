@@ -98,7 +98,7 @@ end
 -- in-memory anchor survives -- startup.lua then holds it in STANDBY (idle, on the
 -- monitor, OTA-updatable) until a START kicks off a clean first run. Never returns.
 ----------------------------------------------------------------------
-local STATE_FILES = { "quarry.state", "stripmine.state", "tree_config.txt" }
+local STATE_FILES = { "quarry.state", "stripmine.state", "oremine.state", "tree_config.txt" }
 
 function control.resetAndReboot()
   for _, f in ipairs(STATE_FILES) do
