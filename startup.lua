@@ -5,7 +5,9 @@
 -- persist runstate="stopped"; START clears it back to "run". So a turtle that was
 -- parked stays parked across reboots instead of silently resuming into your base.
 --
---   runstate (missing) -> first run: launch and let it anchor / resume
+--   runstate (missing) -> first run: sit in STANDBY until a START, so a turtle you
+--                         just placed (e.g. to load code in your base) never starts
+--                         digging on its own -- you press START when it's positioned
 --   runstate "run"      -> launch (the program resumes from its .state via GPS)
 --   runstate "stopped"  -> DON'T dig; sit in STANDBY (see below) until a START
 --   runstate "done"     -> job finished; sit in STANDBY until a START re-runs it
@@ -136,8 +138,13 @@ end
 while true do
   runstate = readWord(RUNSTATE_FILE)
 
-  if parkable and (runstate == "stopped" or runstate == "done") then
-    if not standby(runstate) then return end   -- no modem -> shell
+  -- Idle states wait in STANDBY for a START: "stopped"/"done" as before, and now a
+  -- FIRST run (no runstate yet) too -- so a freshly placed turtle sits on the monitor
+  -- instead of immediately digging a hole. A reboot MID-JOB has runstate "run" (the
+  -- worker persists it the instant it starts), so it still resumes on its own with no
+  -- button press. "waiting" is the standby beacon's status: idle-cyan card, START armed.
+  if parkable and (runstate == nil or runstate == "stopped" or runstate == "done") then
+    if not standby(runstate or "waiting") then return end   -- no modem -> shell
     writeWord(RUNSTATE_FILE, "run")
     print("startup: START received -- launching " .. program .. ".")
   end
