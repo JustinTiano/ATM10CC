@@ -49,6 +49,24 @@ function updater.composeHash(files, getContent)
   return h
 end
 
+-- GitHub's raw CDN caches each URL for ~5 min (max-age=300), so a freshly pushed
+-- file can keep serving stale bytes. That breaks OTA two ways: a deploy writes the
+-- OLD code, and the dashboard's "update ready" flag never clears (the checker sees
+-- new, the apply pulls old, forever). A unique query string per request makes the
+-- CDN treat it as a new object and revalidate against origin, so we always get the
+-- just-pushed code. Raw hosts ignore the extra param when serving the file.
+local function bustUrl(url)
+  local sep = url:find("?", 1, true) and "&" or "?"
+  local nonce = tostring((os.epoch and os.epoch("utc")) or os.clock()) .. "-" .. tostring(math.random(1, 1e6))
+  return url .. sep .. "cc=" .. nonce
+end
+
+-- Cache-busting http.get for raw-host URLs. Returns the response handle or nil,
+-- exactly like http.get. Use this for every OTA fetch (deploy + dashboard check).
+function updater.get(url)
+  return http.get(bustUrl(url))
+end
+
 local function readLocal(file)
   if not fs.exists(file) then return nil end
   local f = fs.open(file, "r")
@@ -69,7 +87,7 @@ end
 
 -- Download one file to a temp path, then move it into place atomically.
 local function fetch(base, file)
-  local resp = http.get(base .. file)
+  local resp = updater.get(base .. file)
   if not resp then return false, "no response" end
   local data = resp.readAll()
   resp.close()

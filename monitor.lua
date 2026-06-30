@@ -271,7 +271,7 @@ local function updateChecker()
       for _, f in ipairs(files) do want[f] = true end
     end
     for f in pairs(want) do
-      local resp = http.get(groups.BASE .. f)
+      local resp = updater.get(groups.BASE .. f)
       if resp then map[f] = resp.readAll(); resp.close() end
     end
     for role, files in pairs(groups.GROUPS) do
