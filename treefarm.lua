@@ -383,6 +383,31 @@ nav.open("treefarm")
 control.tag("treefarm")
 updater.tag("treefarm")
 
+-- Honor a dashboard STOP at a safe checkpoint (between trees, or the sweep
+-- boundary): go home, park until START, then resume -- returning true so the
+-- caller aborts and restarts the sweep. Checked every column, so STOP lands in
+-- one tree instead of a whole sweep (or a 45s grow-wait) later.
+local function honorStop()
+  if not control.stopRequested() then return false end
+  goHome()
+  control.setRunState("stopped")
+  send("stopped")
+  control.ackStop()
+  control.waitForStart()
+  control.setRunState("run")
+  send("starting")
+  return true
+end
+
+-- sleep(secs) that bails the instant a STOP is pending, so the grow-wait can't
+-- swallow a STOP for up to GROW_WAIT seconds.
+local function interruptibleSleep(secs)
+  for _ = 1, secs do
+    if control.stopRequested() then return end
+    sleep(1)
+  end
+end
+
 local function worker()
   control.setRunState("run")          -- we are committed to running; survive reboots
   nav.primeFuel()                     -- top up to nav.MIN_FUEL before anything moves
@@ -398,23 +423,14 @@ local function worker()
   send("starting")
 
   while true do
-    -- Honor a dashboard STOP between sweeps (the turtle is home here): idle
-    -- until START, then begin a fresh sweep.
-    if control.stopRequested() then
-      goHome()
-      control.setRunState("stopped")  -- persist STOP so a reboot stays parked
-      send("stopped")
-      control.ackStop()
-      control.waitForStart()
-      control.setRunState("run")
-      send("starting")
-    end
+    honorStop()    -- a STOP pending at the sweep boundary (turtle is home)
 
     local n = treesPerSide()
     if not refuel(n * n * FUEL_PER_TREE) then
       sleep(30)   -- FUEL chest dry: wait for charcoal, then retry
     else
       send("chopping")
+      local completed = true
       for i = 0, n - 1 do
         local cols = {}
         for j = 0, n - 1 do cols[#cols + 1] = j end
@@ -422,23 +438,28 @@ local function worker()
           local r = {}; for k = #cols, 1, -1 do r[#r + 1] = cols[k] end; cols = r
         end
         for _, j in ipairs(cols) do
+          if honorStop() then completed = false; break end  -- STOP: parked + homed
           local t = treeWorld(i, j)
           harvestColumn(t.x, t.z)
           send("chopping")   -- per-column heartbeat: this loop can outlast the
                              -- dashboard's OFFLINE timeout, and treefarm's own
                              -- movement bypasses nav's heartbeat.
         end
+        if not completed then break end
       end
-      send("collecting")
-      goHome()
-      depositLogs()
-      state.sweeps = (state.sweeps or 0) + 1
-      if CLEAR_EVERY > 0 and state.sweeps % CLEAR_EVERY == 0 then
-        fullClear()       -- mop up stray logs/leaves the per-column harvest missed
+
+      if completed then     -- a STOP restarts the sweep instead of depositing
+        send("collecting")
+        goHome()
+        depositLogs()
+        state.sweeps = (state.sweeps or 0) + 1
+        if CLEAR_EVERY > 0 and state.sweeps % CLEAR_EVERY == 0 then
+          fullClear()       -- mop up stray logs/leaves the per-column harvest missed
+        end
+        saveConfig()        -- persist logsDeposited + sweeps across reboots
+        send("waiting")
+        interruptibleSleep(GROW_WAIT)
       end
-      saveConfig()        -- persist logsDeposited + sweeps across reboots
-      send("waiting")
-      sleep(GROW_WAIT)
     end
   end
 end

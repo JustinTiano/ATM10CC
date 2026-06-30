@@ -96,9 +96,32 @@ local function digOutAndBack(n)
   nav.turnRight(); nav.turnRight()      -- restore entry facing
 end
 
+-- Honor a dashboard STOP at a safe checkpoint (the corridor centerline, or the
+-- level boundary). Returns to the shaft along the cleared corridor, surfaces,
+-- parks until START, then comes home -- and returns true so the caller aborts and
+-- RESTARTS the current Y level (cheap: the corridor is already air, so the redo is
+-- just travel). Returns false when no STOP is pending. Checked every corridor
+-- step, so STOP now lands in seconds instead of a whole Y level later.
+local function honorStop()
+  if not control.stopRequested() then return false end
+  nav.goTo(0, 0)
+  nav.returnToSurface()
+  control.setRunState("stopped")
+  report("stopped")
+  control.ackStop()
+  control.waitForStart()
+  control.setRunState("run")
+  report("resuming")
+  nav.goHome()
+  return true
+end
+
+-- Returns true if the corridor finished, false if a STOP was honored mid-corridor
+-- (caller should restart the level).
 local function mineCorridor(len, spacing, branchLen, side, ylevel)
   turtle.digUp()
   for step = 1, len do
+    if honorStop() then return false end   -- STOP: parked + homed; abort corridor
     ensureSpace()
     ensureFuel({ side = side, ylevel = ylevel, step = step })
     if not nav.fwdDig2() then break end   -- bedrock/obstruction: stop this corridor
@@ -110,6 +133,39 @@ local function mineCorridor(len, spacing, branchLen, side, ylevel)
     end
   end
   turtle.digUp()
+  return true
+end
+
+-- Mine one Y level: descend, then both corridors. A mid-corridor STOP parks/waits
+-- (via honorStop) then restarts the level here. Returns true when complete, false
+-- if the shaft is blocked before this depth (no deeper level reachable).
+local function mineLevel(targetY, targetDepth)
+  while true do
+    nav.goTo(0, 0)
+    local diff = targetDepth - nav.depth()
+    if diff > 0 then
+      if not nav.descend(diff) then
+        print("Shaft blocked before Y=" .. targetY .. "; stopping here.")
+        nav.returnToSurface()
+        return false
+      end
+    elseif diff < 0 then nav.ascend(-diff) end
+
+    print(("=== Y=%d (depth=%d) Fuel=%s ==="):format(targetY, targetDepth, tostring(nav.fuel())))
+
+    report("mining", "back", targetY, 0)
+    nav.goTo(0, WIDTH - 1); nav.face(0)
+    if mineCorridor(TUN_LEN, BRANCH_SPC, BRANCH_LEN, "back", targetY) then
+      nav.goTo(0, 0)
+      report("mining", "front", targetY, 0)
+      nav.face(2)
+      if mineCorridor(TUN_LEN, BRANCH_SPC, BRANCH_LEN, "front", targetY) then
+        nav.goTo(0, 0)
+        return true
+      end
+    end
+    -- STOPped mid-corridor: honorStop already parked/waited/homed; loop restarts.
+  end
 end
 
 ----------------------------------------------------------------------
@@ -165,18 +221,7 @@ local function worker()
   print("Y levels: " .. table.concat(Y_LEVELS, ", "))
 
 for i = startIdx, #Y_LEVELS do
-  -- Honor a dashboard STOP between Y levels (the turtle is at the shaft origin
-  -- here): rise to the surface, idle until START, then resume at the next level.
-  if control.stopRequested() then
-    nav.returnToSurface()
-    control.setRunState("stopped")    -- persist STOP so a reboot stays parked
-    report("stopped")
-    control.ackStop()
-    control.waitForStart()
-    control.setRunState("run")
-    report("resuming")
-    nav.goHome()
-  end
+  honorStop()    -- a STOP pending right at the level boundary (turtle is home)
 
   local targetY     = Y_LEVELS[i]
   local targetDepth = SURFACE_Y - targetY
@@ -184,31 +229,7 @@ for i = startIdx, #Y_LEVELS do
   if targetDepth < 0 then
     print("Skip Y=" .. targetY .. " (above surface)")
   else
-    nav.goTo(0, 0)
-    local diff = targetDepth - nav.depth()
-    if diff > 0 then
-      if not nav.descend(diff) then
-        -- Shaft hit bedrock before this depth: no deeper level is reachable.
-        print("Shaft blocked before Y=" .. targetY .. "; stopping here.")
-        nav.returnToSurface()
-        break
-      end
-    elseif diff < 0 then nav.ascend(-diff) end
-
-    print(("=== Y=%d (depth=%d) Fuel=%s ==="):format(targetY, targetDepth, tostring(nav.fuel())))
-
-    -- Back wall: go to far edge, carve outward (+Z)
-    report("mining", "back", targetY, 0)
-    nav.goTo(0, WIDTH - 1); nav.face(0)
-    mineCorridor(TUN_LEN, BRANCH_SPC, BRANCH_LEN, "back", targetY)
-    nav.goTo(0, 0)
-
-    -- Front wall: from corner carve outward (-Z)
-    report("mining", "front", targetY, 0)
-    nav.face(2)
-    mineCorridor(TUN_LEN, BRANCH_SPC, BRANCH_LEN, "front", targetY)
-    nav.goTo(0, 0)
-
+    if not mineLevel(targetY, targetDepth) then break end   -- shaft blocked: done
     saveState(i, home, hvec)
     nav.verifyPos()
     print("Y=" .. targetY .. " complete. Fuel: " .. tostring(nav.fuel()))

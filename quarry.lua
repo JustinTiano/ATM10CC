@@ -73,22 +73,50 @@ end
 ----------------------------------------------------------------------
 -- Returns true if the whole layer was cleared, or false if a move was blocked
 -- by an unbreakable block (turtle left sitting against it, facing it).
-local function digLayer()
+-- Honor a dashboard STOP at a safe checkpoint. Returns to the shaft at the
+-- current depth, climbs the shaft to the surface, parks until START, then comes
+-- home and drops back to this layer -- returning true so the caller aborts and
+-- RESTARTS the layer (cheap: the dug part is air, so the redo is just travel).
+-- Returns false when no STOP is pending. Checked every block, so STOP now lands
+-- in ~a second instead of a whole layer later.
+local function honorStop(layer)
+  if not control.stopRequested() then return false end
+  nav.goTo(0, 0); nav.face(0)
+  nav.returnToSurface()
+  control.setRunState("stopped")
+  report("stopped", layer)
+  control.ackStop()
+  control.waitForStart()
+  control.setRunState("run")
+  report("resuming", layer)
+  nav.goHome()
+  nav.descend(layer)
+  return true
+end
+
+-- Raster the WIDTH x WIDTH layer from (0,0). Returns (completed, stopped):
+--   true,  false -> layer finished
+--   false, true  -> a STOP was honored mid-layer (caller restarts the layer)
+--   false, false -> hit an obstruction (caller inspects bedrock vs. stuck)
+local function digLayer(layer)
+  nav.goTo(0, 0); nav.face(0)          -- normalize start (no-op on a fresh layer)
   for row = 0, WIDTH - 1 do
     for _ = 0, WIDTH - 2 do
+      if honorStop(layer) then return false, true end
       ensureSpace()
-      if not nav.fwd() then return false end
+      if not nav.fwd() then return false, false end
     end
     if row < WIDTH - 1 then
+      if honorStop(layer) then return false, true end
       ensureSpace()
       if row % 2 == 0 then
-        nav.turnRight(); if not nav.fwd() then return false end; nav.turnRight()
+        nav.turnRight(); if not nav.fwd() then return false, false end; nav.turnRight()
       else
-        nav.turnLeft();  if not nav.fwd() then return false end; nav.turnLeft()
+        nav.turnLeft();  if not nav.fwd() then return false, false end; nav.turnLeft()
       end
     end
   end
-  return true
+  return true, false
 end
 
 ----------------------------------------------------------------------
@@ -154,20 +182,8 @@ local function worker()
   end
 
   while true do
-    -- Honor a dashboard STOP at the layer boundary (the turtle is back at the
-    -- shaft origin here): rise to the surface, idle until START, then resume by
-    -- dropping straight back to the last completed layer.
-    if control.stopRequested() then
-      nav.returnToSurface()
-      control.setRunState("stopped")   -- persist STOP so a reboot stays parked
-      report("stopped", layer)
-      control.ackStop()
-      control.waitForStart()
-      control.setRunState("run")
-      report("resuming", layer)
-      nav.goHome()
-      nav.descend(layer)
-    end
+    -- A STOP pending right at the layer boundary (turtle is at the shaft origin).
+    honorStop(layer)
 
     -- Stop at the configured floor or when bedrock sits directly below the shaft.
     if (SURFACE_Y - (layer + 1)) < BOTTOM_Y then
@@ -185,15 +201,24 @@ local function worker()
     report("mining", layer)
     print(("Layer %d | Y=%d | Fuel %s"):format(layer, SURFACE_Y - layer, tostring(nav.fuel())))
 
-    if not digLayer() then
-      -- Hit an unbreakable block mid-layer. Either way, return safely by rising
-      -- into the layer above (always fully cleared, so it's open) before homing.
-      local bedrock = nav.bedrockAhead()
-      nav.up()
-      nav.goTo(0, 0); nav.face(0)
-      if bedrock then
-        return finish("Bedrock reached mid-layer. Done digging.")
+    -- Dig the layer; a mid-layer STOP parks/waits (honorStop) then restarts it.
+    local completed = false
+    while not completed do
+      local done, stopped = digLayer(layer)
+      if done then
+        completed = true
+      elseif stopped then
+        -- honorStop already parked + resumed (homed, dropped back to this layer);
+        -- loop to re-raster the layer.
       else
+        -- Hit an unbreakable block mid-layer. Return safely by rising into the
+        -- layer above (always fully cleared, so it's open) before homing.
+        local bedrock = nav.bedrockAhead()
+        nav.up()
+        nav.goTo(0, 0); nav.face(0)
+        if bedrock then
+          return finish("Bedrock reached mid-layer. Done digging.")
+        end
         report("blocked", layer)         -- not bedrock: raise STUCK + chat the operator
         nav.returnToSurface()
         control.setRunState("stopped")   -- persist so a reboot stays parked, not re-hitting
@@ -203,7 +228,7 @@ local function worker()
         control.setRunState("run")
         report("resuming", layer)
         nav.goHome()
-        nav.descend(layer)               -- back to the last layer; the loop re-attempts it
+        nav.descend(layer)               -- back to the last layer; redo it
       end
     end
 
