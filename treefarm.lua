@@ -72,13 +72,23 @@ local function selectItem(word)
   return false
 end
 
--- Apples are junk on a birch farm (the magnet is filtered to saplings, so the
--- turtle should never see one -- but if it does, drop it rather than carry/replant).
-local function voidApples()
+-- After logs go to the chest, tidy what the turtle picked up breaking the canopy:
+-- drop sticks/apples (junk -- keep them out of the furnace loop) and any saplings
+-- beyond SAPLING_BUFFER. Everything is dropped into the field at home, where the
+-- (saplings-only) magnet re-grabs the surplus saplings and ignores the junk (which
+-- despawns). So the turtle carries only logs out and a tidy replant buffer back.
+local function tidyInventory()
+  local keptSap = 0
   for slot = 1, 14 do
-    if nameHas(turtle.getItemDetail(slot), "apple") then
-      turtle.select(slot)
-      turtle.drop()
+    local it = turtle.getItemDetail(slot)
+    if it then
+      if nameHas(it, "sapling") then
+        local room = math.max(0, SAPLING_BUFFER - keptSap)
+        if it.count > room then turtle.select(slot); turtle.drop(it.count - room) end
+        keptSap = keptSap + math.min(it.count, room)
+      elseif nameHas(it, "stick") or nameHas(it, "apple") then
+        turtle.select(slot); turtle.drop()
+      end
     end
   end
   turtle.select(1)
@@ -265,7 +275,6 @@ local function refillSaplings()
   if ok and isChest(d) then
     while countItem("sapling") < SAPLING_BUFFER and turtle.suckDown() do end
   end
-  voidApples()
   ascendTo(transitY)
 end
 
@@ -285,7 +294,11 @@ local function depositLogs()
     local it = turtle.getItemDetail(s)
     if isLog(it) then added = added + it.count end
   end
-  nav.dumpInventory(function(it) return nameHas(it, "sapling") end)
+  -- Keep the LOGS ender chest LOGS-ONLY (it feeds the furnace loop): dump only
+  -- logs, keeping everything non-log (fuel + saplings + the stray junk), then tidy
+  -- the rest -- drop sticks/apples and recirculate surplus saplings to the magnet.
+  nav.dumpInventory(function(it) return not isLog(it) end)
+  tidyInventory()
   state.logsDeposited = state.logsDeposited + added
 end
 
