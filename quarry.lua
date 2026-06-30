@@ -112,6 +112,7 @@ end
 
 local function worker()
   control.setRunState("run")          -- we are committed to running; survive reboots
+  nav.primeFuel()                     -- top up to nav.MIN_FUEL before anything moves
   local saved = loadState()
   if isStaleState(saved) then
     print("Moved since last run -- discarding stale state, re-anchoring here.")

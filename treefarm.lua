@@ -385,6 +385,7 @@ updater.tag("treefarm")
 
 local function worker()
   control.setRunState("run")          -- we are committed to running; survive reboots
+  nav.primeFuel()                     -- top up to nav.MIN_FUEL before anything moves
   if loadConfig() then
     pos = nav.locate(); if not pos then error("No GPS fix") end
     calibrateHeading()

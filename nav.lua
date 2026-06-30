@@ -22,6 +22,8 @@ local nav = {}
 ----------------------------------------------------------------------
 nav.FUEL_SLOT = 16   -- ender chest on the FUEL channel  (charcoal IN)
 nav.DUMP_SLOT = 15   -- ender chest on the DUMP/LOGS channel (items OUT)
+nav.MIN_FUEL  = 1000 -- shared startup floor: every script primes its tank to at
+                     -- least this (loose fuel + the FUEL chest) before it works
 local WORKING_MAX = 14
 local MOVE_TRIES  = 60   -- dig/attack retries per move before declaring a hard block
 
@@ -404,12 +406,29 @@ function nav.dumpInventory(extraKeep)
   return true
 end
 
--- Top up fuel from the FUEL ender chest, in place. Keeps up to `reserve`
--- charcoal items afterward; returns the surplus to the chest. Returns true if
--- the target fuel level was reached, false (and reports fuel_empty) otherwise.
+-- Burn loose fuel already in the working inventory toward `target`, one item at a
+-- time so we never overshoot by more than one. Needs NO ender chest, so fuel
+-- hand-placed in a slot is actually used -- the gap that left a turtle dead next
+-- to its own charcoal. Returns true once fuel >= target.
+function nav.burnLooseFuel(target)
+  for s = 1, WORKING_MAX do
+    while nav.fuel() < target and isFuelItem(turtle.getItemDetail(s)) do
+      turtle.select(s)
+      turtle.refuel(1)
+    end
+    if nav.fuel() >= target then break end
+  end
+  turtle.select(1)
+  return nav.fuel() >= target
+end
+
+-- Top up fuel toward `target`. Uses loose fuel on hand FIRST (works with no
+-- chest), then pulls from the FUEL ender chest if still short. Keeps up to
+-- `reserve` charcoal items afterward; returns the surplus to the chest. Returns
+-- true if the target was reached, false (and reports fuel_empty) otherwise.
 function nav.refuelFromEnder(target, reserve, reportExtra)
   reserve = reserve or 0
-  if nav.fuel() >= target then return true end
+  if nav.burnLooseFuel(target) then return true end
   if not placeUpFrom(nav.FUEL_SLOT) then
     nav.report("fuel_empty", reportExtra)
     return false
@@ -448,6 +467,20 @@ function nav.refuelFromEnder(target, reserve, reportExtra)
   local ok = nav.fuel() >= target
   if not ok then nav.report("fuel_empty", reportExtra) end
   return ok
+end
+
+-- Shared startup "prime": burn any loose fuel on hand, then pull from the FUEL
+-- ender chest up to nav.MIN_FUEL, so every script begins with a known floor in the
+-- tank (enough to anchor, calibrate, and work a while before the next top-up).
+-- Call it at the very start of a worker, before anchoring. Blocks-with-report
+-- until fueled if the chest is dry, so a turtle waits for charcoal instead of
+-- dying. Returns true once primed.
+function nav.primeFuel(minFuel, reportExtra)
+  local target = minFuel or nav.MIN_FUEL
+  while not nav.refuelFromEnder(target, 0, reportExtra) do
+    sleep(10)   -- nothing to burn and the FUEL chest is empty: wait for charcoal
+  end
+  return true
 end
 
 return nav
