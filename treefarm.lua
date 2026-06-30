@@ -1,13 +1,24 @@
--- treefarm.lua -- GPS grid tree farm (harvest-from-above), static 7x7 footprint.
+-- treefarm.lua -- GPS grid BIRCH farm (harvest-from-above), static 7x7 footprint.
 -- Runs on a Mining/Felling Turtle with a wireless modem.
+--
+-- WHY BIRCH + A MAGNET CHEST:
+--   * Birch is a pure 1x1 trunk with no large/branchy variant, so cutting straight
+--     down each column removes 100% of the logs every sweep. With no log left
+--     standing, EVERY leaf decays on its own -- no leaf-clearing pass needed.
+--   * A Sophisticated Storage chest with an Advanced Magnet upgrade sits at the
+--     field CENTER and vacuums all the sapling drops (filter it to saplings). The
+--     turtle never chases ground drops; it just reloads its replant buffer by
+--     sucking saplings back out of that chest before each sweep.
 --
 -- PLACEMENT (first run):
 --   * Stand the turtle on the FRONT-LEFT corner of the field, ON the ground,
 --     FACING into the field.
 --   * SLOT 16 = FUEL-channel ender chest, SLOT 15 = LOGS-channel ender chest.
---   * Load some saplings + charcoal. A GPS constellation must be in range.
+--   * Put the MAGNET chest at the field center (block 3,3 on a 7x7 -- an odd
+--     position, so it doesn't displace a tree), top flush with the soil.
+--   * Load some birch saplings + charcoal. A GPS constellation must be in range.
 --
--- 7x7 footprint -> trees on every-other block -> a 4x4 grid = 16 trees.
+-- 7x7 footprint -> birch on every-other block -> a 4x4 grid = 16 trees.
 -- Config (home + heading) is captured once from GPS and saved; reboots are silent.
 
 local nav     = require("nav")
@@ -19,11 +30,8 @@ local SIZE          = 7        -- static footprint
 local FUEL_PER_TREE = 50       -- rough fuel budget per tree per cycle
 local FUEL_RESERVE  = 64       -- charcoal items kept in inventory after topping up
 local TRANSIT_UP    = 12       -- height above home to fly between columns
-local LEAF_WAIT     = 0        -- seconds to pause for leaf-decay drops (0 = skip; ground drops get scooped on later passes)
-local GROW_WAIT     = 45       -- seconds between sweeps
-local CLEAR_EVERY   = 6        -- full-area clear every N harvest sweeps (0 = never)
-local CLEAR_HEIGHT  = 16       -- clear from ground+1 up to home.y+CLEAR_HEIGHT (cover canopies)
-local CLEAR_MARGIN  = 1        -- extend the clear box this many blocks past the trees (catch overhang)
+local GROW_WAIT     = 75       -- seconds between sweeps (ungrown spots are skipped, caught next sweep)
+local SAPLING_BUFFER = 32      -- replant stock to keep on hand (refilled from the magnet chest)
 
 ----------------------------------------------------------------------
 -- Position / heading (absolute world coords from GPS)
@@ -40,6 +48,9 @@ local function isLog(d) return nameHas(d, "log") or nameHas(d, "wood") or nameHa
 local function isSoil(d)
   return nameHas(d, "dirt") or nameHas(d, "grass") or nameHas(d, "podzol")
       or nameHas(d, "farmland") or nameHas(d, "rooted")
+end
+local function isChest(d)
+  return nameHas(d, "chest") or nameHas(d, "barrel") or nameHas(d, "sophisticated")
 end
 
 local function countItem(word)
@@ -59,6 +70,18 @@ local function selectItem(word)
     end
   end
   return false
+end
+
+-- Apples are junk on a birch farm (the magnet is filtered to saplings, so the
+-- turtle should never see one -- but if it does, drop it rather than carry/replant).
+local function voidApples()
+  for slot = 1, 14 do
+    if nameHas(turtle.getItemDetail(slot), "apple") then
+      turtle.select(slot)
+      turtle.drop()
+    end
+  end
+  turtle.select(1)
 end
 
 local function treesPerSide() return math.floor((SIZE - 1) / 2) + 1 end
@@ -176,8 +199,22 @@ local function treeWorld(i, j)
   }
 end
 
+-- World (x,z) of the magnet chest: the field center. On a 7x7 that's local cell
+-- (3,3) from home -- an odd block, so it never sits where a tree goes.
+local function chestWorld()
+  local rv = rightVec()
+  local c  = math.floor(SIZE / 2)
+  return {
+    x = home.x + fwd0.x * c + rv.x * c,
+    z = home.z + fwd0.z * c + rv.z * c,
+  }
+end
+
 ----------------------------------------------------------------------
--- Harvest one column: descend digging trunk, replant, rise back up
+-- Harvest one column: descend digging the 1x1 birch trunk, replant, rise.
+-- Birch leaves to the sides are left untouched -- they decay on their own once
+-- the trunk (and all the other trunks this sweep) are gone, and the magnet chest
+-- collects the sapling drops. No ground-collection here.
 ----------------------------------------------------------------------
 local function harvestColumn(tx, tz)
   ascendTo(transitY)
@@ -192,17 +229,13 @@ local function harvestColumn(tx, tz)
     elseif isSoil(d) then
       break                           -- reached the planting spot
     elseif nameHas(d, "sapling") then
-      -- not grown yet: grab any ground drops here, leave the sapling, skip
-      turtle.suck(); turtle.suckDown()
-      ascendTo(transitY)
+      ascendTo(transitY)              -- not grown yet: leave it, skip
       return
     else
       downDig()                       -- log / leaves / other: cut through it
     end
   end
   -- Standing on the soil spot (harvested a tree, or it was empty). Replant.
-  if LEAF_WAIT > 0 then sleep(LEAF_WAIT) end
-  turtle.suck(); turtle.suckDown()
   upDig()
   if selectItem("sapling") then
     turtle.placeDown()
@@ -210,6 +243,29 @@ local function harvestColumn(tx, tz)
   -- Out of saplings: leave the spot bare. The dashboard derives the NO SAPLINGS
   -- warning from the saplings=0 count carried in every report, so there's no
   -- dedicated status here (and thus no flicker against the per-column heartbeat).
+  ascendTo(transitY)
+end
+
+----------------------------------------------------------------------
+-- Reload the replant buffer from the center magnet chest. The magnet vacuums all
+-- the sapling drops into this chest; we suck them back out before each sweep.
+----------------------------------------------------------------------
+local function refillSaplings()
+  if countItem("sapling") >= SAPLING_BUFFER then return end
+  local c = chestWorld()
+  ascendTo(transitY)
+  goHoriz(c.x, c.z)
+  -- Drop to just above the chest -- descend through air only, and STOP on the
+  -- chest (never dig it). Anything unexpected below also stops us.
+  local ok, d = turtle.inspectDown()
+  while pos.y > home.y + 1 and not ok do
+    downDig()
+    ok, d = turtle.inspectDown()
+  end
+  if ok and isChest(d) then
+    while countItem("sapling") < SAPLING_BUFFER and turtle.suckDown() do end
+  end
+  voidApples()
   ascendTo(transitY)
 end
 
@@ -241,110 +297,6 @@ local function goHome()
 end
 
 ----------------------------------------------------------------------
--- Periodic full-area clear. The per-tree harvest only digs straight down each
--- trunk column, so big/branchy trees (large oaks especially) leave stray logs
--- between columns -- and the leaves around them won't decay while a log is near.
--- Every CLEAR_EVERY sweeps we visit every column of the field grid and clear it
--- top-down, but SMART, not brute force:
---   * dig only logs/leaves; free-fall through air (no pointless digging);
---   * stop a column once its canopy is cleared (a short run of air below the
---     last wood) instead of plowing the empty trunk space down to the ground;
---   * never touch a standing sapling, the soil, or anything we don't recognize
---     (so a wall/build inside the field is left alone);
---   * suck drops down each column AND finish with a low pass over the field, so
---     the saplings/apples end up in the turtle instead of on the ground for you
---     to gather by hand.
--- Removing all the logs also lets any leaves overhanging past the box decay.
-----------------------------------------------------------------------
-local function freeSlots()
-  local n = 0
-  for s = 1, 16 do if turtle.getItemCount(s) == 0 then n = n + 1 end end
-  return n
-end
-
-local function fullClear()
-  local n    = treesPerSide()
-  local fMax = (2 * n - 1) + CLEAR_MARGIN     -- forward extent (home row = local 0)
-  local rMax = (2 * n - 2) + CLEAR_MARGIN     -- right extent
-  local clearTop = home.y + CLEAR_HEIGHT       -- fly/scan height above the canopy
-  local rv   = rightVec()
-  local AIR_AFTER = 2                          -- stop a column this many air blocks past the last wood
-
-  -- Budget ~two vertical passes per column plus the horizontal hops. Skip the
-  -- clear (try again next cycle) rather than strand the turtle if fuel is short.
-  local cols   = (fMax + 1) * (rMax + 1)
-  local budget = cols * (2 * CLEAR_HEIGHT + 2) + cols + 200
-  if not refuel(budget) then return end
-
-  -- world (x,z) of the local grid cell (f forward, r right)
-  local function cell(f, r)
-    return home.x + fwd0.x * f + rv.x * r, home.z + fwd0.z * f + rv.z * r
-  end
-
-  -- Clear the column under the turtle: dig only logs/leaves, free-fall air, suck
-  -- drops down with us, and bail once the canopy's been cleared. Soil, saplings,
-  -- and unrecognized blocks stop the descent untouched.
-  local function clearColumn()
-    local seen, airRun = false, 0
-    while pos.y > home.y do
-      local ok, d = turtle.inspectDown()
-      if not ok then                                   -- air
-        if seen then
-          airRun = airRun + 1
-          if airRun >= AIR_AFTER then break end        -- canopy cleared; don't plow the trunk gap
-        end
-        turtle.suckDown(); downDig()                   -- (downDig in air just moves down)
-      elseif isLog(d) or nameHas(d, "leaves") then     -- wood: dig it, follow drops down
-        seen, airRun = true, 0
-        turtle.suckDown(); downDig()
-      else
-        break                                          -- soil / sapling / a build: leave it
-      end
-    end
-    turtle.suck(); turtle.suckDown()
-    ascendTo(clearTop)
-  end
-
-  send("clearing")
-  ascendTo(clearTop)
-
-  -- Serpentine the column grid (adjacent columns are one hop apart at clearTop).
-  local fwdFirst = true
-  for r = 0, rMax do
-    if control.stopRequested() then break end
-    if freeSlots() <= 2 then ascendTo(transitY); goHome(); depositLogs(); ascendTo(clearTop) end
-    for i = 0, fMax do
-      local f = fwdFirst and i or (fMax - i)
-      ascendTo(clearTop)
-      local wx, wz = cell(f, r)
-      goHoriz(wx, wz)
-      clearColumn()
-    end
-    fwdFirst = not fwdFirst
-    send("clearing")                                   -- heartbeat: a clear can outlast OFFLINE_SECS
-  end
-
-  -- Low vacuum pass: glide one block above the field and suck up the drops that
-  -- fell to the ground, so saplings/apples come home instead of needing pickup.
-  if not control.stopRequested() then
-    ascendTo(home.y + 1)
-    local fwd2 = true
-    for r = 0, rMax do
-      for i = 0, fMax do
-        local f = fwd2 and i or (fMax - i)
-        local wx, wz = cell(f, r)
-        goHoriz(wx, wz)
-        turtle.suckDown(); turtle.suck()
-      end
-      fwd2 = not fwd2
-      send("clearing")
-    end
-  end
-
-  ascendTo(transitY); goHome(); depositLogs()
-end
-
-----------------------------------------------------------------------
 -- Config
 ----------------------------------------------------------------------
 local function saveConfig()
@@ -367,7 +319,7 @@ local function loadConfig()
 end
 
 local function firstRunSetup()
-  print("=== Tree farm first-time setup (7x7) ===")
+  print("=== Tree farm first-time setup (7x7 birch) ===")
   pos = nav.locate(); if not pos then error("No GPS fix") end
   home = { x = pos.x, y = pos.y, z = pos.z }
   calibrateHeading()
@@ -436,6 +388,7 @@ local function worker()
     if not refuel(n * n * FUEL_PER_TREE) then
       sleep(30)   -- FUEL chest dry: wait for charcoal, then retry
     else
+      refillSaplings()   -- top up the replant buffer from the center magnet chest
       send("chopping")
       local completed = true
       for i = 0, n - 1 do
@@ -460,9 +413,6 @@ local function worker()
         goHome()
         depositLogs()
         state.sweeps = (state.sweeps or 0) + 1
-        if CLEAR_EVERY > 0 and state.sweeps % CLEAR_EVERY == 0 then
-          fullClear()       -- mop up stray logs/leaves the per-column harvest missed
-        end
         saveConfig()        -- persist logsDeposited + sweeps across reboots
         send("waiting")
         interruptibleSleep(GROW_WAIT)

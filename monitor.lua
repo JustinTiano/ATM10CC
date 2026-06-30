@@ -111,8 +111,6 @@ local DEVICES = {
     alert = function(status, s)
       if status == "starting" then
         return { chat = "Tree farm online. Fuel: " .. tostring(s.fuel) }
-      elseif status == "clearing" then
-        return { chat = "Tree farm doing a full-area clear" }
       elseif status == "stopped" then
         return { chat = "Tree farm stopped" }
       end
