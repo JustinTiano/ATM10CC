@@ -87,6 +87,12 @@ end
 local function digOutAndBack(n)
   local moved = 0
   for _ = 1, n do
+    -- A hard stop must not have to wait out a whole branch: stop EXTENDING the
+    -- instant it's requested. We still retrace exactly what we dug (below) so the
+    -- tracked position stays truthful; honorStop() at the next corridor step then
+    -- parks us home. Without this, a hard stop landing on a branch step ran the
+    -- full out-and-back (~2*branchLen moves) before it registered.
+    if control.hardStopRequested() then break end
     ensureSpace()
     if nav.fwdDig2() then moved = moved + 1 else break end
   end
