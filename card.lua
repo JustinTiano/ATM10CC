@@ -29,6 +29,12 @@ card.TERMINAL = { done=true, waiting=true, stopped=true }
 card.ALARM    = { low_fuel=true, fuel_empty=true, no_saplings=true,
                   full_inventory=true, blocked=true, dump_chest_missing=true }
 
+-- Statuses where the turtle is intentionally quiet: parked by a STOP, or finished
+-- a job. Silence here is normal, so the dashboard must NOT flag these OFFLINE.
+-- Everything else (active work, alarms, and the idle "waiting" between sweeps) is
+-- expected to keep broadcasting, so going silent there means the turtle died.
+card.QUIET    = { stopped=true, done=true }
+
 function card.statusColor(s)
   if s == "OFFLINE" then return colors.red end
   if card.ACTIVE[s]   then return colors.lime end
@@ -230,6 +236,18 @@ end
 -- True if (x,y) falls inside a {x0,x1,y} button rect from card.draw.
 function card.hit(btn, x, y)
   return btn and y == btn.y and x >= btn.x0 and x <= btn.x1
+end
+
+-- Briefly highlight a button rect so a tap is never ambiguous. The caller's next
+-- redraw repaints the button to its normal state, so this just paints a bright
+-- block and pauses. Keep the pause short: sleep() discards other events while it
+-- waits, and broadcasts are periodic so a missed one self-corrects on the next.
+function card.flash(mon, btn)
+  if not btn then return end
+  mon.setBackgroundColor(colors.white)
+  mon.setCursorPos(btn.x0, btn.y)
+  mon.write(string.rep(" ", btn.x1 - btn.x0 + 1))
+  sleep(0.1)
 end
 
 return card

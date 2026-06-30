@@ -225,7 +225,10 @@ local function tick()
   for key, s in pairs(store) do
     local dev     = DEV_BY_KEY[key]
     local age     = now - (s._last or now)
-    local working = card.ACTIVE[s.status] or card.ALARM[s.status]
+    -- Anything that isn't intentionally quiet (parked/finished) is expected to
+    -- keep beating -- including the idle "waiting" state between sweeps -- so a
+    -- long silence there means the turtle died: flip it to OFFLINE, not stale.
+    local working = s.status ~= nil and not card.QUIET[s.status]
     s._offline    = working and age > OFFLINE_SECS
 
     -- Pending-update flag: our reported code hash vs what the host now publishes.
@@ -297,11 +300,12 @@ local function visible(s)
   return true
 end
 
--- "running" drives button arming: a live/idle module shows STOP; a stopped,
--- finished, or offline one shows START.
+-- "running" drives button arming: an actively-working module shows STOP; an idle
+-- one shows START. The idle set is card.TERMINAL (stopped, done, AND waiting) --
+-- a module parked between sweeps is idle, so START should arm, not STOP.
 local function isRunning(s)
   if s._offline then return false end
-  return s.status ~= "stopped" and s.status ~= "done"
+  return not card.TERMINAL[s.status]
 end
 
 ----------------------------------------------------------------------
@@ -364,6 +368,7 @@ local function onTouch(tx, ty)
   for _, c in ipairs(cards) do
     local g = c.geom
     if card.hit(g.buttons and g.buttons.update, tx, ty) then
+      card.flash(mon, g.buttons.update)
       local s = store[c.key]
       if s and s._updateAvail then
         -- Idle/parked: act on the first tap. Mid-task (ACTIVE): arm first, act on
@@ -377,8 +382,10 @@ local function onTouch(tx, ty)
       end
       return
     elseif card.hit(g.buttons and g.buttons.start, tx, ty) then
+      card.flash(mon, g.buttons.start)
       sendCommand(c.key, "start"); return
     elseif card.hit(g.buttons and g.buttons.stop, tx, ty) then
+      card.flash(mon, g.buttons.stop)
       sendCommand(c.key, "stop"); return
     elseif tx >= g.extent.x0 and tx <= g.extent.x1
        and ty >= g.extent.y0 and ty <= g.extent.y1 then
