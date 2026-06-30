@@ -136,6 +136,27 @@ local DEVICES = {
       end
     end,
   },
+  {
+    key = "oremine", title = "ORE MINER", color = colors.lightBlue, gps = true, control = true,
+    rows = function(s) return {
+      { "Y/Side",  tostring(s.ylevel or "?") .. " " .. tostring(s.side or ""), colors.white },
+      { "Step",    s.step or 0, colors.lime },
+      { "Profile", s.profile or "?", colors.lightBlue },
+      fuelRow(s),
+    } end,
+    warn = baseWarn,
+    alert = function(status, s)
+      if status == "starting" then
+        return { chat = "Ore miner online. Fuel: " .. tostring(s.fuel) }
+      elseif status == "resuming" then
+        return { chat = "Ore miner resuming" }
+      elseif status == "stopped" then
+        return { chat = "Ore miner stopped" }
+      elseif status == "done" then
+        return { chat = "Ore mine complete! Fuel: " .. tostring(s.fuel) }
+      end
+    end,
+  },
 }
 
 -- The dashboard's own descriptor. It never tiles as a card -- it's the banner at
