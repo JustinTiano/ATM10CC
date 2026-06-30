@@ -16,6 +16,7 @@ local control = {}
 
 local tag      = "turtle"
 local stopReq  = false
+local hardStop = false
 local startReq = false
 
 function control.tag(t) tag = t or tag end
@@ -23,25 +24,34 @@ function control.tag(t) tag = t or tag end
 -- Forever loop: accept only commands addressed to us. The turtle also hears its
 -- own status broadcasts (they carry `from`, not `to`/`cmd`) and other turtles'
 -- commands -- both are filtered out here.
+--
+-- STOP is two-stage. The first STOP is a CYCLE stop (stopReq): the worker finishes
+-- its current unit -- layer / corridor / sweep -- then parks, so resume is cheap
+-- (no re-walking). A SECOND STOP while one is already pending escalates to a HARD
+-- stop (hardStop): the worker bails at its next safe checkpoint and heads home
+-- right away, accepting that it'll redo the current unit on resume.
 function control.listen()
   while true do
     local _, raw = rednet.receive()
     local msg = (type(raw) == "string") and textutils.unserialise(raw) or raw
     if type(msg) == "table" and msg.to == tag and msg.cmd then
       if msg.cmd == "stop" then
-        stopReq = true
+        if stopReq then hardStop = true else stopReq = true end
       elseif msg.cmd == "start" then
-        startReq, stopReq = true, false
+        startReq, stopReq, hardStop = true, false, false
       end
     end
   end
 end
 
--- True once a STOP has arrived and not yet been acknowledged by the worker.
+-- True once a STOP (of either kind) is pending and not yet acknowledged.
 function control.stopRequested() return stopReq end
 
--- The worker calls this after it has parked to a safe state, to clear the flag.
-function control.ackStop() stopReq = false end
+-- True once a STOP has been escalated to a hard stop (a second STOP tap).
+function control.hardStopRequested() return hardStop end
+
+-- The worker calls this after it has parked to a safe state, to clear the flags.
+function control.ackStop() stopReq, hardStop = false, false end
 
 -- Block (letting `listen` keep running in parallel) until a START arrives.
 function control.waitForStart()

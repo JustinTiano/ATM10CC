@@ -96,14 +96,10 @@ local function digOutAndBack(n)
   nav.turnRight(); nav.turnRight()      -- restore entry facing
 end
 
--- Honor a dashboard STOP at a safe checkpoint (the corridor centerline, or the
--- level boundary). Returns to the shaft along the cleared corridor, surfaces,
--- parks until START, then comes home -- and returns true so the caller aborts and
--- RESTARTS the current Y level (cheap: the corridor is already air, so the redo is
--- just travel). Returns false when no STOP is pending. Checked every corridor
--- step, so STOP now lands in seconds instead of a whole Y level later.
-local function honorStop()
-  if not control.stopRequested() then return false end
+-- Park to a safe idle state: back to the shaft along the cleared corridor, up to
+-- the surface, persist the STOP, then wait for START and come home. Used by both
+-- the cycle stop (at the level boundary) and the hard stop (mid-corridor).
+local function park()
   nav.goTo(0, 0)
   nav.returnToSurface()
   control.setRunState("stopped")
@@ -113,6 +109,15 @@ local function honorStop()
   control.setRunState("run")
   report("resuming")
   nav.goHome()
+end
+
+-- Mid-corridor checkpoint: only a HARD stop (double-tap) parks here and heads home
+-- right away. A single (cycle) stop is left for the level-boundary check so the
+-- current Y level finishes first. Returns true if it parked (caller restarts the
+-- level). Checked every corridor step, so a hard stop lands in seconds.
+local function honorStop()
+  if not control.hardStopRequested() then return false end
+  park()
   return true
 end
 
@@ -221,7 +226,9 @@ local function worker()
   print("Y levels: " .. table.concat(Y_LEVELS, ", "))
 
 for i = startIdx, #Y_LEVELS do
-  honorStop()    -- a STOP pending right at the level boundary (turtle is home)
+  -- Cycle stop: a single STOP is honored here, at the level boundary, so the
+  -- last Y level finished cleanly before parking.
+  if control.stopRequested() then park() end
 
   local targetY     = Y_LEVELS[i]
   local targetDepth = SURFACE_Y - targetY

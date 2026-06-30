@@ -73,14 +73,10 @@ end
 ----------------------------------------------------------------------
 -- Returns true if the whole layer was cleared, or false if a move was blocked
 -- by an unbreakable block (turtle left sitting against it, facing it).
--- Honor a dashboard STOP at a safe checkpoint. Returns to the shaft at the
--- current depth, climbs the shaft to the surface, parks until START, then comes
--- home and drops back to this layer -- returning true so the caller aborts and
--- RESTARTS the layer (cheap: the dug part is air, so the redo is just travel).
--- Returns false when no STOP is pending. Checked every block, so STOP now lands
--- in ~a second instead of a whole layer later.
-local function honorStop(layer)
-  if not control.stopRequested() then return false end
+-- Park to a safe idle state: back to the shaft, climb to the surface, persist the
+-- STOP, then wait for START and drop back to `layer` ready to mine it. Used by
+-- both the cycle stop (at the layer boundary) and the hard stop (mid-layer).
+local function park(layer)
   nav.goTo(0, 0); nav.face(0)
   nav.returnToSurface()
   control.setRunState("stopped")
@@ -91,6 +87,14 @@ local function honorStop(layer)
   report("resuming", layer)
   nav.goHome()
   nav.descend(layer)
+end
+
+-- Mid-layer checkpoint: only a HARD stop (double-tap) parks here and heads home
+-- right away. A single (cycle) stop is left for the layer-boundary check so the
+-- current layer finishes first. Returns true if it parked (caller restarts layer).
+local function honorStop(layer)
+  if not control.hardStopRequested() then return false end
+  park(layer)
   return true
 end
 
@@ -182,8 +186,9 @@ local function worker()
   end
 
   while true do
-    -- A STOP pending right at the layer boundary (turtle is at the shaft origin).
-    honorStop(layer)
+    -- Cycle stop: a single STOP is honored here, at the layer boundary, so the
+    -- last layer finished cleanly before parking.
+    if control.stopRequested() then park(layer) end
 
     -- Stop at the configured floor or when bedrock sits directly below the shaft.
     if (SURFACE_Y - (layer + 1)) < BOTTOM_Y then

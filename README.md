@@ -25,8 +25,11 @@ standardized on a **static 7×7 footprint** and a shared **charcoal fuel loop**.
 > must sit beside it.
 >
 > **Dashboard buttons:** the monitor's START/STOP buttons broadcast to each
-> turtle. STOP makes a turtle finish its current layer/level/sweep, park on the
-> surface (mines) or at home (tree farm), and idle; START resumes it from there.
+> turtle. A single STOP is a **cycle stop** — the turtle finishes its current
+> layer/level/sweep, parks on the surface (mines) or at home (tree farm), and
+> idles; START resumes from there with no wasted travel. Tap STOP **again while
+> it's stopping** to escalate to a **hard stop**: the turtle heads home right away
+> (within ~a second), and on START it redoes the interrupted unit.
 
 ---
 
@@ -188,8 +191,10 @@ Set the dashboard's `role.txt` to `monitor` so `startup.lua` relaunches
 `monitor.lua` on boot — required for the dashboard to come back after an
 over-the-air self-update (below).
 
-The cards' **START/STOP** buttons broadcast to each turtle: STOP makes a turtle
-finish its current layer/level/sweep, park safe, and idle; START resumes it.
+The cards' **START/STOP** buttons broadcast to each turtle. A single STOP is a
+**cycle stop**: the turtle finishes its current layer/level/sweep, parks safe, and
+idles (cheap resume). A **second STOP while it's stopping** escalates to a **hard
+stop** — it heads home within ~a second and redoes the interrupted unit on START.
 
 A **dashboard self-card** (purple) shows this computer's own status and update
 state alongside the turtles.

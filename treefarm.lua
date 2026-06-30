@@ -383,12 +383,9 @@ nav.open("treefarm")
 control.tag("treefarm")
 updater.tag("treefarm")
 
--- Honor a dashboard STOP at a safe checkpoint (between trees, or the sweep
--- boundary): go home, park until START, then resume -- returning true so the
--- caller aborts and restarts the sweep. Checked every column, so STOP lands in
--- one tree instead of a whole sweep (or a 45s grow-wait) later.
-local function honorStop()
-  if not control.stopRequested() then return false end
+-- Park to a safe idle state: go home, persist the STOP, then wait for START.
+-- Used by both the cycle stop (at the sweep boundary) and the hard stop (mid-sweep).
+local function park()
   goHome()
   control.setRunState("stopped")
   send("stopped")
@@ -396,6 +393,14 @@ local function honorStop()
   control.waitForStart()
   control.setRunState("run")
   send("starting")
+end
+
+-- Mid-sweep checkpoint: only a HARD stop (double-tap) parks here right away. A
+-- single (cycle) stop is left for the sweep-boundary check so the current sweep
+-- finishes (and deposits) first. Returns true if it parked (caller restarts sweep).
+local function honorStop()
+  if not control.hardStopRequested() then return false end
+  park()
   return true
 end
 
@@ -423,7 +428,9 @@ local function worker()
   send("starting")
 
   while true do
-    honorStop()    -- a STOP pending at the sweep boundary (turtle is home)
+    -- Cycle stop: a single STOP is honored here, at the sweep boundary, so the
+    -- last sweep finished (and deposited) before parking.
+    if control.stopRequested() then park() end
 
     local n = treesPerSide()
     if not refuel(n * n * FUEL_PER_TREE) then
