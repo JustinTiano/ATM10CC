@@ -39,6 +39,11 @@ function control.listen()
         if stopReq then hardStop = true else stopReq = true end
       elseif msg.cmd == "start" then
         startReq, stopReq, hardStop = true, false, false
+      elseif msg.cmd == "reset" then
+        -- Wipe the saved location and reboot (see resetAndReboot). The dashboard
+        -- only offers reset on an idle card, with an arm->confirm tap, so this
+        -- can't fire mid-dig from a stray touch.
+        control.resetAndReboot()
       end
     end
   end
@@ -83,6 +88,24 @@ function control.getRunState()
   f.close()
   if s == "" then return nil end
   return s
+end
+
+----------------------------------------------------------------------
+-- Reset (relocation). Wipe the saved location/progress so the NEXT start
+-- re-anchors fresh at the turtle's CURRENT spot instead of flying back to (or
+-- resuming at) the old site. Each role only has its own file; deleting the whole
+-- known set is harmless. We park (runstate "stopped") and reboot so no stale
+-- in-memory anchor survives -- startup.lua then holds it in STANDBY (idle, on the
+-- monitor, OTA-updatable) until a START kicks off a clean first run. Never returns.
+----------------------------------------------------------------------
+local STATE_FILES = { "quarry.state", "stripmine.state", "tree_config.txt" }
+
+function control.resetAndReboot()
+  for _, f in ipairs(STATE_FILES) do
+    if fs.exists(f) then fs.delete(f) end
+  end
+  control.setRunState("stopped")
+  os.reboot()
 end
 
 return control

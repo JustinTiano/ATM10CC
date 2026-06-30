@@ -199,6 +199,20 @@ The cards' **START/STOP** buttons broadcast to each turtle. A single STOP is a
 idles (cheap resume). A **second STOP while it's stopping** escalates to a **hard
 stop** — it heads home within ~a second and redoes the interrupted unit on START.
 
+### Reset token (relocating a turtle)
+
+An **idle** card (parked/done/waiting) shows a small **`[R]`** token in its title
+bar. Tapping it **wipes that turtle's saved location** (`quarry.state` /
+`stripmine.state` / `tree_config.txt`) and reboots it back to STANDBY, so the next
+**START** re-anchors it **fresh at wherever it now sits** — the easy way to move a
+quarry/strip miner/tree farm to a new spot, or to re-run the same spot from scratch
+after a partial run. It's destructive, so it's guarded like the update token: the
+first tap **arms** it (red **`[R!]`**), and you must tap again within 5s to confirm.
+The token only appears when the turtle is idle, so a working dig is never one tap
+from a wipe. (You usually don't need it when relocating a *finished* turtle — a
+clean run already clears its state — but it's there for stopped/partial turtles and
+short moves the auto-detect can't catch.)
+
 A **dashboard self-card** (purple) shows this computer's own status and update
 state alongside the turtles.
 

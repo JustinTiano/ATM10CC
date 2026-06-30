@@ -104,8 +104,15 @@ local function standby(statusName)
     while true do
       local _, raw = rednet.receive()
       local msg = (type(raw) == "string") and textutils.unserialise(raw) or raw
-      if type(msg) == "table" and msg.to == role and msg.cmd == "start" then
-        started = true; return
+      if type(msg) == "table" and msg.to == role and msg.cmd then
+        if msg.cmd == "start" then
+          started = true; return
+        elseif msg.cmd == "reset" then
+          -- A finished/parked turtle lives here, not in the role's control.listen,
+          -- so honor reset in STANDBY too: wipe the saved location and reboot back
+          -- into STANDBY, ready for a clean START at its new spot.
+          require("control").resetAndReboot()
+        end
       end
     end
   end

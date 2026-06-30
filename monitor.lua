@@ -251,6 +251,12 @@ local function tick()
       s._updArmed = false
     end
 
+    -- Reset-button arm guard mirrors the update token: the confirm tap must land
+    -- within 5s, and a turtle that goes back to work drops any pending arm (its
+    -- reset token is hidden while active, so an arm there is stale).
+    if s._resetArmed and (now - (s._resetArmedAt or 0) > 5) then s._resetArmed = false end
+    if card.ACTIVE[s.status] then s._resetArmed = false end
+
     local w = dev.warn and dev.warn(s)
     if w then
       -- Chat the operator when a problem first appears OR changes to a different
@@ -440,6 +446,21 @@ local function onTouch(tx, ty)
         else
           s._updArmed = false
           triggerUpdate(c.key)
+        end
+      end
+      return
+    elseif card.hit(g.buttons and g.buttons.reset, tx, ty) then
+      card.flash(mon, g.buttons.reset)
+      -- Reset is destructive (wipes the saved location), so always arm first and
+      -- act on the confirm tap -- even though the token only shows when idle.
+      local s = store[c.key]
+      if s then
+        if not s._resetArmed then
+          s._resetArmed, s._resetArmedAt = true, os.clock()
+          notify("Tap [R!] again to wipe " .. DEV_BY_KEY[c.key].title .. "'s saved location")
+        else
+          s._resetArmed = false
+          sendCommand(c.key, "reset")
         end
       end
       return

@@ -193,15 +193,32 @@ function card.draw(mon, desc, state, x, w, y0, bodyRows)
   -- A pending-update token sits just left of the status and is tappable. "[^]"
   -- (yellow) = update available; "[^!]" (red) = armed, waiting for a confirm tap
   -- (used when the device is mid-task so a stray tap can't reboot it).
-  local updBtn = nil
+  -- Title-bar tokens grow leftward from the status text: the update token first,
+  -- then (on an idle card) the reset token to its left. Each is skipped if it would
+  -- collide with the title.
+  local updBtn, resetBtn = nil, nil
+  local tokLeft = rx
+  local function placeToken(tok, col)
+    local tx = tokLeft - 1 - #tok
+    if tx < titleEnd then return nil end
+    put(mon, tx, y, col, colors.black, tok)
+    tokLeft = tx
+    return { x0 = tx, x1 = tx + #tok - 1, y = y }
+  end
+
   if state._updateAvail then
     local tok  = state._updArmed and "[^!]" or "[^]"
     local tcol = state._updArmed and colors.red or colors.yellow
-    local txk  = rx - 1 - #tok
-    if txk >= titleEnd then
-      put(mon, txk, y, tcol, colors.black, tok)
-      updBtn = { x0 = txk, x1 = txk + #tok - 1, y = y }
-    end
+    updBtn = placeToken(tok, tcol)
+  end
+
+  -- Reset token: only on an idle, online, controllable card -- so a live dig is
+  -- never one tap from wiping its saved location. Arm -> confirm like the update
+  -- token ("[R]" -> red "[R!]"); the dashboard routes the confirm tap to a reset.
+  if desc.control and not state.running and not state._offline then
+    local tok  = state._resetArmed and "[R!]" or "[R]"
+    local tcol = state._resetArmed and colors.red or colors.orange
+    resetBtn = placeToken(tok, tcol)
   end
 
   if rx > x + 3 + #title then
@@ -276,8 +293,9 @@ function card.draw(mon, desc, state, x, w, y0, bodyRows)
     y = y + 1
   end
 
-  -- The update token lives in the title bar but routes like any other button.
-  if updBtn then buttons = buttons or {}; buttons.update = updBtn end
+  -- The title-bar tokens route like any other button.
+  if updBtn   then buttons = buttons or {}; buttons.update = updBtn end
+  if resetBtn then buttons = buttons or {}; buttons.reset  = resetBtn end
 
   -- Bottom border closes the box.
   hrule(mon, x, y, w, color)
