@@ -212,8 +212,10 @@ it doesn't displace a tree), its top **flush with the soil**. Center-to-corner o
 vacuums **every** sapling drop in the field. **Filter the magnet to saplings only**
 (it ignores sticks/apples, and logs never become entities — turtle-dug logs go
 straight to its inventory). The turtle never chases ground drops; before each sweep
+(and mid-sweep the instant it's short of saplings to finish the remaining replants)
 it flies to the center chest and sucks saplings back out to reload its replant
-buffer. Apples are treated as junk and dropped, never replanted. This magnet chest is
+buffer, so it never limps to the end of a sweep leaving bare spots. Apples are
+treated as junk and dropped, never replanted. This magnet chest is
 a 3rd piece of infrastructure (alongside the FUEL and LOGS ender chests) but is **not**
 a reserved turtle slot.
 

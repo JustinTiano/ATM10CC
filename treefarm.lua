@@ -278,6 +278,22 @@ local function refillSaplings()
   ascendTo(transitY)
 end
 
+-- True once a sweep's mid-run refill found the magnet chest can't top us up, so we
+-- stop detouring to an empty chest for the rest of THIS sweep. Reset each sweep.
+local sweepChestDry = false
+
+-- Keep enough saplings on hand to finish the replants still ahead this sweep. If
+-- we're short, detour to the center chest RIGHT NOW (don't limp to the end of the
+-- sweep bare) -- the chest is also filling with this sweep's fresh drops, so a
+-- mid-run top-up usually recovers. If even that can't reach `need`, give up the
+-- detour for the rest of the sweep so we don't thrash flying to a dry chest.
+local function ensureSaplings(need)
+  if need <= 0 or sweepChestDry then return end
+  if countItem("sapling") >= need then return end
+  refillSaplings()
+  if countItem("sapling") < need then sweepChestDry = true end
+end
+
 ----------------------------------------------------------------------
 -- Fuel + deposit (via ender chests)
 ----------------------------------------------------------------------
@@ -401,9 +417,11 @@ local function worker()
     if not refuel(n * n * FUEL_PER_TREE) then
       sleep(30)   -- FUEL chest dry: wait for charcoal, then retry
     else
+      sweepChestDry = false
       refillSaplings()   -- top up the replant buffer from the center magnet chest
       send("chopping")
       local completed = true
+      local replantsLeft = n * n   -- upper bound on saplings still needed this sweep
       for i = 0, n - 1 do
         local cols = {}
         for j = 0, n - 1 do cols[#cols + 1] = j end
@@ -412,8 +430,10 @@ local function worker()
         end
         for _, j in ipairs(cols) do
           if honorStop() then completed = false; break end  -- STOP: parked + homed
+          ensureSaplings(replantsLeft)   -- short on saplings? detour to the chest now
           local t = treeWorld(i, j)
           harvestColumn(t.x, t.z)
+          replantsLeft = replantsLeft - 1
           send("chopping")   -- per-column heartbeat: this loop can outlast the
                              -- dashboard's OFFLINE timeout, and treefarm's own
                              -- movement bypasses nav's heartbeat.
