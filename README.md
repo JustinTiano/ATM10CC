@@ -8,7 +8,7 @@ standardized on a **static 7×7 footprint** and a shared **charcoal fuel loop**.
 | `monitor.lua` | Advanced Computer      | Dashboard (modem + monitor + chatBox) |
 | `quarry.lua`  | Mining turtle          | Digs a 7×7 shaft to bedrock |
 | `stripmine.lua`| Mining turtle         | Branch tunnels at fixed Y levels (run after quarry) |
-| `oremine.lua` | Mining turtle          | **Ore-seeking** branch miner for the ATM10 Mining Dimension: vein-follows at ore-band Y levels, digs its own shaft (no quarry needed) |
+| `oremine.lua` | Mining turtle          | Straight **branch miner** for the ATM10 Mining Dimension: grids 2-tall tunnels at ore-band Y levels inside a 3×3 chunk load, digs its own shaft (no quarry needed) |
 | `treefarm.lua`| Felling turtle         | 7×7 birch field (16 trees), harvest-from-above + magnet-chest sapling collection |
 | `nav.lua`     | every turtle           | Shared library (movement, GPS, ender chests) — **must be present** |
 | `control.lua` | every turtle           | START/STOP command listener for the dashboard buttons — **must be present** |
@@ -137,18 +137,22 @@ back walls. Defaults (edit constants at the top of `stripmine.lua`):
 `TUN_LEN=32`, `BRANCH_LEN=16`, `BRANCH_SPC=3`,
 `Y_LEVELS = 48,15,0,-16,-40,-59`.
 
-### Ore miner — the ATM10 workhorse (best ore-per-fuel)
-For actual ore gathering, this beats both the quarry and strip miner. The quarry
-hauls megatons of stone per ore (good for clearing a build site, wasteful for
-gathering); plain strip mining only catches a vein it tunnels straight through.
-`oremine.lua` adds **vein-following**: at every corridor/branch step it scans the
-full 2-tall cross-section and floods out along any ore it can see, so a branch
-harvests everything within a block or two — and it targets ATM10's real ore bands
-instead of arbitrary depths.
+### Ore miner — the ATM10 gatherer
+For actual ore gathering, this beats the quarry: the quarry hauls megatons of
+stone per ore (good for clearing a build site, wasteful for gathering).
+`oremine.lua` is a plain **branch mine** — at each ATM10 ore band it carves a grid
+of 2-tall tunnels and keeps whatever ore it drives straight through. No vein
+chasing or scanning, so it covers far more ground for the fuel (= finds more
+resources), and it targets ATM10's real ore bands instead of arbitrary depths.
+
+The whole dig stays inside a **3×3 chunk load** (48 blocks): `SPAN` sets the reach
+from the shaft in every direction, and the mined square is `2*SPAN+1` on a side.
+Default `SPAN=16` fits a 3×3 no matter where the turtle sits in its chunk; if you
+center the chunk loader on the shaft you can push `SPAN` up toward 22.
 
 Stand the turtle **on the surface where it can dig straight down**, **facing** the
-direction the corridors should run. It digs its **own** access shaft to each Y
-level (**no quarry needed**). A GPS constellation must be in range **in whatever
+direction the spine should run. It digs its **own** access shaft to each Y level
+(**no quarry needed**). A GPS constellation must be in range **in whatever
 dimension you run it in**. Slot 16 = FUEL chest, Slot 15 = DUMP chest.
 
 **Pick a dimension profile** — a turtle can't tell the Overworld from the Mining
@@ -169,17 +173,18 @@ The Mining Dimension is the better place to mine if you have access — flat, no
 hostile spawns, very high ore density — but the `overworld` profile works anywhere
 you can set up GPS.
 
-Other defaults (edit constants at the top of `oremine.lua`): `TUN_LEN=48`,
-`BRANCH_LEN=12`, `BRANCH_SPC=3`, `MAX_VEIN=96`. Add `85`/`115` to the `mining`
-levels (or extra bands to `overworld`) for fuller coverage.
+Other defaults (edit constants at the top of `oremine.lua`): `SPAN=16`,
+`BRANCH_SPC=3`. Lower `BRANCH_SPC` to catch more ore per level (more stone dug);
+add `85`/`115` to the `mining` levels (or extra bands to `overworld`) for fuller
+Y coverage — each level is cheap now that it doesn't vein-follow.
 
 **Two ATM10 notes:**
 - **Allthemodium needs a netherite-tier pickaxe.** A diamond turtle physically
-  can't break it; the vein-follower detects this once and **skips that ore-type
-  fast** for the rest of the run (no grinding). Equip a netherite-or-better
-  pickaxe if you want the turtle to actually collect it. In the Overworld it only
-  spawns below Y−40 in the **Deep Dark** — expect sculk (and possibly a Warden;
-  it can't break the turtle, just makes noise).
+  can't break it, so a tunnel that runs into allthemodium just **stops at that
+  block** (ends that corridor early). Equip a netherite-or-better pickaxe if you
+  want the turtle to collect it. In the Overworld it only spawns below Y−40 in the
+  **Deep Dark** — expect sculk (and possibly a Warden; it can't break the turtle,
+  just makes noise).
 - **Vibranium and unobtainium don't spawn in the Overworld or Mining Dimension**
   (they're Nether / End), so neither profile finds them — that's expected.
 
