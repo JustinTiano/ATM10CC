@@ -72,6 +72,14 @@ local function selectItem(word)
   return false
 end
 
+-- First empty working slot (1..14; 15/16 are the ender chests). nil if all full.
+local function firstFreeSlot()
+  for slot = 1, 14 do
+    if turtle.getItemCount(slot) == 0 then return slot end
+  end
+  return nil
+end
+
 -- After logs go to the chest, tidy what the turtle picked up breaking the canopy:
 -- drop sticks/apples (junk -- keep them out of the furnace loop) and any saplings
 -- beyond SAPLING_BUFFER. Everything is dropped into the field at home, where the
@@ -275,7 +283,17 @@ local function refillSaplings()
     ok, d = turtle.inspectDown()
   end
   if ok and isChest(d) then
+    -- suckDown drops into the selected slot first, so start on a guaranteed-empty
+    -- one; then pull until we hit the buffer or the chest stops giving items.
+    local free = firstFreeSlot()
+    if free then turtle.select(free) end
+    local before = countItem("sapling")
     while countItem("sapling") < SAPLING_BUFFER and turtle.suckDown() do end
+    turtle.select(1)
+    print(("refill: on %s, pulled %d saplings (now %d)")
+      :format(d.name, countItem("sapling") - before, countItem("sapling")))
+  else
+    print("refill: nothing suckable below (" .. (ok and d.name or "air") .. ")")
   end
   ascendTo(transitY)
 end
