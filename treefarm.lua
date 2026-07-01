@@ -265,11 +265,12 @@ local function refillSaplings()
   local c = chestWorld()
   ascendTo(transitY)
   goHoriz(c.x, c.z)
-  -- Drop to just above the chest, cutting through anything in the way (birch
-  -- leaves love to overhang the center) but STOPPING on the chest so we never dig
-  -- it. The home.y+1 floor also guards the chest if it's somehow not detected.
+  -- Drop until the chest is directly below us, cutting through anything in the way
+  -- (birch leaves love to overhang the center) but STOPPING on the chest so we
+  -- never dig it. The chest sits ~flush with the soil (home.y-1), so we descend to
+  -- home.y; the floor also stops us before we'd ever dig the soil/chest layer.
   local ok, d = turtle.inspectDown()
-  while pos.y > home.y + 1 and not (ok and isChest(d)) do
+  while pos.y > home.y and not (ok and isChest(d)) do
     downDig()   -- air, or leaves/logs overhanging the chest: cut through
     ok, d = turtle.inspectDown()
   end
