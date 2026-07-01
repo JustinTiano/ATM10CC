@@ -249,6 +249,16 @@ local function harvestColumn(tx, tz)
     elseif nameHas(d, "sapling") then
       ascendTo(transitY)              -- not grown yet: leave it, skip
       return
+    elseif isChest(d) then
+      -- A chest directly below means we're mis-positioned over the center magnet
+      -- chest -- the two center-row harvest columns sit only ONE block from it, so
+      -- any 1-block drift (GPS can be off by a block; see calibrateHeading) lands
+      -- us here. NEVER dig it: alarm, back off, skip this column. Without this
+      -- guard the catch-all cut-through below eats the chest (the refill path is
+      -- already guarded the same way).
+      nav.report("blocked", { detail = "treefarm over chest -- misaligned" })
+      ascendTo(transitY)
+      return
     else
       downDig()                       -- log / leaves / other: cut through it
     end

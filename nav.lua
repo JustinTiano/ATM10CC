@@ -64,16 +64,18 @@ local function isFuelItem(it)
 end
 nav.isFuelItem = isFuelItem
 
--- Whether working slot `s` holds something the turtle will actually burn -- ANY
--- valid fuel, not just vanilla coal/charcoal. turtle.refuel(0) asks the game if the
--- selected item is combustible WITHOUT consuming it, so a turtle lives on modded
--- charcoal, coal blocks, coal coke, etc. in its FUEL chest instead of starving next
--- to fuel it didn't recognize (it used to pull such fuel out and never burn it).
--- Selects slot `s` as a side effect (so a following turtle.refuel(1) burns from it);
--- callers restore the selection (turtle.select(1)) when the loop is done.
+-- Whether working slot `s` holds fuel the turtle should burn. For now that's just
+-- vanilla coal/charcoal (the FUEL_NAMES whitelist). We deliberately do NOT use
+-- turtle.refuel(0) ("is it combustible?") here: logs, planks and sticks are all
+-- valid furnace fuel, so that let the tree farm classify its own harvested logs as
+-- fuel -- keeping them instead of depositing them, and burning them for movement.
+-- To support modded fuels later, add their names to FUEL_NAMES; that keeps fuel a
+-- deliberate whitelist rather than "anything that burns". Selects slot `s` as a
+-- side effect (so a following turtle.refuel(1) burns from it); callers restore the
+-- selection (turtle.select(1)) when the loop is done.
 local function slotIsFuel(s)
   turtle.select(s)
-  return turtle.refuel(0)
+  return isFuelItem(turtle.getItemDetail(s))
 end
 nav.slotIsFuel = slotIsFuel
 
@@ -398,8 +400,10 @@ function nav.workingInventoryFull()
   return true
 end
 
--- Dump working slots into the DUMP/LOGS ender chest. Fuel items are always
--- kept; `extraKeep(it)` may keep more (e.g. saplings). Returns logs/all dropped.
+-- Dump working slots into the DUMP/LOGS ender chest. Fuel items (coal/charcoal)
+-- are always kept; `extraKeep(it)` may keep more (e.g. saplings). Since fuel is now
+-- a coal/charcoal whitelist, logs are no longer mistaken for fuel and the tree
+-- farm's logs get dumped. Returns true once dropped (false if the chest is missing).
 function nav.dumpInventory(extraKeep)
   if not placeUpFrom(nav.DUMP_SLOT) then
     nav.report("dump_chest_missing", {})
@@ -408,7 +412,7 @@ function nav.dumpInventory(extraKeep)
   for s = 1, WORKING_MAX do
     local it = turtle.getItemDetail(s)
     if it then
-      local keep = slotIsFuel(s) or (extraKeep ~= nil and extraKeep(it))
+      local keep = isFuelItem(it) or (extraKeep ~= nil and extraKeep(it))
       if not keep then
         turtle.select(s)
         turtle.dropUp()
