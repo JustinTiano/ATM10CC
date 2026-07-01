@@ -64,6 +64,19 @@ local function isFuelItem(it)
 end
 nav.isFuelItem = isFuelItem
 
+-- Whether working slot `s` holds something the turtle will actually burn -- ANY
+-- valid fuel, not just vanilla coal/charcoal. turtle.refuel(0) asks the game if the
+-- selected item is combustible WITHOUT consuming it, so a turtle lives on modded
+-- charcoal, coal blocks, coal coke, etc. in its FUEL chest instead of starving next
+-- to fuel it didn't recognize (it used to pull such fuel out and never burn it).
+-- Selects slot `s` as a side effect (so a following turtle.refuel(1) burns from it);
+-- callers restore the selection (turtle.select(1)) when the loop is done.
+local function slotIsFuel(s)
+  turtle.select(s)
+  return turtle.refuel(0)
+end
+nav.slotIsFuel = slotIsFuel
+
 function nav.fuel()
   local f = turtle.getFuelLevel()
   if f == "unlimited" then return math.huge end
@@ -395,7 +408,7 @@ function nav.dumpInventory(extraKeep)
   for s = 1, WORKING_MAX do
     local it = turtle.getItemDetail(s)
     if it then
-      local keep = isFuelItem(it) or (extraKeep ~= nil and extraKeep(it))
+      local keep = slotIsFuel(s) or (extraKeep ~= nil and extraKeep(it))
       if not keep then
         turtle.select(s)
         turtle.dropUp()
@@ -412,9 +425,8 @@ end
 -- to its own charcoal. Returns true once fuel >= target.
 function nav.burnLooseFuel(target)
   for s = 1, WORKING_MAX do
-    while nav.fuel() < target and isFuelItem(turtle.getItemDetail(s)) do
-      turtle.select(s)
-      turtle.refuel(1)
+    while nav.fuel() < target and slotIsFuel(s) do
+      turtle.refuel(1)   -- slotIsFuel already selected slot s
     end
     if nav.fuel() >= target then break end
   end
@@ -434,11 +446,13 @@ function nav.refuelFromEnder(target, reserve, reportExtra)
     return false
   end
 
-  -- Burn charcoal one at a time, pulling stacks as needed, until target or dry.
+  -- Burn fuel one item at a time, pulling stacks as needed, until target or dry.
+  -- Anything in the FUEL chest is fuel by intent, so burn whatever the turtle
+  -- accepts (slotIsFuel) -- not just vanilla coal/charcoal.
   while nav.fuel() < target do
     local fslot = nil
     for s = 1, WORKING_MAX do
-      if isFuelItem(turtle.getItemDetail(s)) then fslot = s; break end
+      if slotIsFuel(s) then fslot = s; break end
     end
     if fslot then
       turtle.select(fslot)
@@ -452,11 +466,10 @@ function nav.refuelFromEnder(target, reserve, reportExtra)
   -- Return surplus fuel above `reserve` back into the chest.
   local kept = 0
   for s = 1, WORKING_MAX do
-    local it = turtle.getItemDetail(s)
-    if isFuelItem(it) then
+    if slotIsFuel(s) then
+      local it = turtle.getItemDetail(s)   -- slotIsFuel selected slot s
       local keepHere = math.max(0, reserve - kept)
       if it.count > keepHere then
-        turtle.select(s)
         turtle.dropUp(it.count - keepHere)
       end
       kept = kept + math.min(it.count, keepHere)
